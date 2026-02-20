@@ -1,0 +1,38 @@
+{
+  "name": "ctxmap",
+  "version": "0.1.0",
+  "description": "Claude Code token usage analysis and visualization tool",
+  "type": "module",
+  "main": "dist/cli/index.js",
+  "bin": {
+    "ctxmap": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext .ts",
+    "check:all": "tsc --noEmit && npm test"
+  },
+  "keywords": [
+    "claude",
+    "token",
+    "usage",
+    "analysis",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0",
+    "glob": "^11.0.1"
+  }
+}
