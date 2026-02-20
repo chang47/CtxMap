@@ -126,12 +126,29 @@ export interface FileStats {
   avgTokens: number;
 }
 
+export interface ToolSizeStats {
+  toolName: string;
+  count: number;
+  totalSizeBytes: number;
+  avgSizeBytes: number;
+  files: Array<{ path: string; sizeBytes: number; count: number }>;
+}
+
 export interface TopConsumer {
   description: string;
   tokens: number;
   cumulative: number;
   toolName: string;
   turnIndex: number;
+}
+
+export interface UserRequestStats {
+  userPrompt: string;      // The user's message (truncated for display)
+  turnCount: number;       // How many turns this request spanned
+  totalTokens: number;     // Total token delta for this request
+  toolCount: number;       // Number of tool calls made
+  startTurn: number;       // First turn index
+  endTurn: number;         // Last turn index
 }
 
 // ============================================================================
@@ -157,8 +174,10 @@ export interface SessionReport {
   segments: SessionSegment[];
   compactEvents: CompactEvent[];
   topConsumers: TopConsumer[];
+  userRequestStats: UserRequestStats[];
   toolStats: ToolStats[];
   fileStats: FileStats[];
+  toolSizeStats: ToolSizeStats[];
 }
 
 // ============================================================================

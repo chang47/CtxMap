@@ -9,7 +9,9 @@ import type {
   SessionSegment,
   ToolStats,
   FileStats,
+  ToolSizeStats,
   TopConsumer,
+  UserRequestStats,
   SessionReport,
   ToolCall,
 } from './types.js';
@@ -269,6 +271,107 @@ export function aggregateFileStats(turns: Turn[]): FileStats[] {
 }
 
 /**
+ * Aggregate tool statistics by file size (actual KB fed into context)
+ * This is more accurate than token deltas for understanding what content
+ * is being loaded into context.
+ */
+export function aggregateToolSizeStats(turns: Turn[]): ToolSizeStats[] {
+  // Track per-tool aggregated stats
+  const toolMap = new Map<string, {
+    count: number;
+    totalSizeBytes: number;
+    files: Map<string, { sizeBytes: number; count: number }>;
+  }>();
+
+  for (const turn of turns) {
+    if (!turn.toolCall) continue;
+
+    const { toolName, input } = turn.toolCall;
+    const sizeBytes = turn.resultSize || 0;
+
+    // Get or create tool entry
+    let toolStats = toolMap.get(toolName);
+    if (!toolStats) {
+      toolStats = {
+        count: 0,
+        totalSizeBytes: 0,
+        files: new Map(),
+      };
+      toolMap.set(toolName, toolStats);
+    }
+
+    toolStats.count++;
+    toolStats.totalSizeBytes += sizeBytes;
+
+    // Extract file/identifier for per-file breakdown
+    let identifier: string | undefined;
+    switch (toolName) {
+      case 'Read':
+      case 'Edit':
+      case 'Write':
+      case 'NotebookEdit':
+        identifier = input.file_path as string;
+        break;
+      case 'Bash':
+        // Use the command as the identifier, truncated
+        const cmd = String(input.command || '');
+        identifier = cmd.substring(0, 60) + (cmd.length > 60 ? '...' : '');
+        break;
+      case 'Glob':
+        identifier = `pattern:${input.pattern as string}`;
+        break;
+      case 'Grep':
+        identifier = `"${String(input.pattern || '').substring(0, 30)}"`;
+        break;
+      case 'Task':
+        identifier = String(input.description || input.subagent_type || 'unknown');
+        break;
+      case 'TaskOutput':
+        identifier = `task:${String(input.task_id || '').substring(0, 8)}`;
+        break;
+      default:
+        identifier = JSON.stringify(input).substring(0, 50);
+    }
+
+    if (identifier) {
+      const fileStats = toolStats.files.get(identifier);
+      if (fileStats) {
+        fileStats.sizeBytes += sizeBytes;
+        fileStats.count++;
+      } else {
+        toolStats.files.set(identifier, { sizeBytes, count: 1 });
+      }
+    }
+  }
+
+  const results: ToolSizeStats[] = [];
+
+  for (const [toolName, stats] of toolMap) {
+    // Convert files map to sorted array
+    const files = Array.from(stats.files.entries())
+      .map(([path, fileStats]) => ({
+        path,
+        sizeBytes: fileStats.sizeBytes,
+        count: fileStats.count,
+      }))
+      .sort((a, b) => b.sizeBytes - a.sizeBytes);
+
+    results.push({
+      toolName,
+      count: stats.count,
+      totalSizeBytes: stats.totalSizeBytes,
+      avgSizeBytes: stats.count > 0 ? Math.round(stats.totalSizeBytes / stats.count) : 0,
+      files,
+    });
+  }
+
+  // Sort by total size descending
+  results.sort((a, b) => b.totalSizeBytes - a.totalSizeBytes);
+
+  return results;
+}
+
+/**
  * Get top token consumers
  */
 export function getTopConsumers(turns: Turn[], limit: number = 10): TopConsumer[] {
@@ -302,6 +405,43 @@ export function getTopConsumers(turns: Turn[], limit: number = 10): TopConsumer[
 }
 
 /**
+ * Aggregate turns by user message to show actual request-level token consumption
+ * This gives a clearer picture of which user requests consumed the most tokens
+ */
+export function aggregateByUserMessage(turns: Turn[]): UserRequestStats[] {
+  if (turns.length === 0) return [];
+
+  const groups: Map<string, UserRequestStats> = new Map();
+
+  for (const turn of turns) {
+    const prompt = turn.userPrompt || '(initial context)';
+
+    const existing = groups.get(prompt);
+
+    if (existing) {
+      // Update existing group
+      existing.turnCount++;
+      existing.totalTokens += turn.tokenDelta;
+      existing.toolCount += turn.toolCall ? 1 : 0;
+      existing.endTurn = turn.turnIndex;
+    } else {
+      // Create new group
+      groups.set(prompt, {
+        userPrompt: prompt,
+        turnCount: 1,
+        totalTokens: turn.tokenDelta,
+        toolCount: turn.toolCall ? 1 : 0,
+        startTurn: turn.turnIndex,
+        endTurn: turn.turnIndex,
+      });
+    }
+  }
+
+  // Sort by total tokens descending
+  return Array.from(groups.values()).sort((a, b) => b.totalTokens - a.totalTokens);
+}
+
+/**
  * Calculate estimated cost based on usage
  */
 export function calculateCost(usage: {
@@ -331,7 +471,9 @@ export function generateReport(
   const segments = segmentSession(turns, compacts);
   const toolStats = aggregateToolStats(turns);
   const fileStats = aggregateFileStats(turns);
+  const toolSizeStats = aggregateToolSizeStats(turns);
   const topConsumers = getTopConsumers(turns);
+  const userRequestStats = aggregateByUserMessage(turns);
 
   // Calculate totals
   const totalInputTokens = turns.reduce((sum, t) => sum + t.usage.input_tokens, 0);
@@ -377,7 +519,9 @@ export function generateReport(
     segments,
     compactEvents: compacts,
     topConsumers,
+    userRequestStats,
     toolStats,
     fileStats,
+    toolSizeStats,
   };
 }

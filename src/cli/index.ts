@@ -22,6 +22,7 @@ import {
   formatJson,
   formatMarkdown,
   formatTurnByTurn,
+  formatSizeReport,
 } from './formatters.js';
 
 const program = new Command();
@@ -40,6 +41,7 @@ program
   .option('-p, --project <path>', 'Project path to search for sessions')
   .option('-f, --format <format>', 'Output format (table, json, markdown)', 'table')
   .option('-t, --top <n>', 'Number of top consumers to show', '10')
+  .option('--by-size', 'Show size-based aggregation instead of token deltas')
   .action(async (options) => {
     try {
       let sessionFile: string | null = null;
@@ -105,7 +107,12 @@ program
           console.log(formatTurnByTurn(report));
           break;
         default:
-          console.log(formatReport(report));
+          // Check for --by-size flag
+          if (options.bySize) {
+            console.log(formatSizeReport(report));
+          } else {
+            console.log(formatReport(report));
+          }
       }
     } catch (error) {
       console.error('Error analyzing session:', error);

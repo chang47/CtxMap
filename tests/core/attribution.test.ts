@@ -3,7 +3,9 @@ import {
   detectCompacts,
   segmentSession,
   aggregateToolStats,
+  aggregateToolSizeStats,
   getTopConsumers,
+  aggregateByUserMessage,
   calculateCost,
   generateReport,
 } from '../../src/core/attribution.js';
@@ -184,6 +186,102 @@ describe('attribution', () => {
     });
   });
 
+  describe('aggregateToolSizeStats', () => {
+    it('should aggregate statistics by tool type based on result size', () => {
+      const turns: Turn[] = [
+        createTurn({
+          toolCall: { toolId: '1', toolName: 'Read', input: { file_path: '/a.ts' }, isError: false },
+          resultSize: 5000,
+        }),
+        createTurn({
+          toolCall: { toolId: '2', toolName: 'Read', input: { file_path: '/b.ts' }, isError: false },
+          resultSize: 3000,
+        }),
+        createTurn({
+          toolCall: { toolId: '3', toolName: 'Bash', input: { command: 'npm test' }, isError: false },
+          resultSize: 10000,
+        }),
+      ];
+
+      const stats = aggregateToolSizeStats(turns);
+
+      expect(stats).toHaveLength(2);
+      expect(stats.find(s => s.toolName === 'Read')?.count).toBe(2);
+      expect(stats.find(s => s.toolName === 'Read')?.totalSizeBytes).toBe(8000);
+      expect(stats.find(s => s.toolName === 'Bash')?.count).toBe(1);
+      expect(stats.find(s => s.toolName === 'Bash')?.totalSizeBytes).toBe(10000);
+    });
+
+    it('should track per-file breakdown', () => {
+      const turns: Turn[] = [
+        createTurn({
+          toolCall: { toolId: '1', toolName: 'Read', input: { file_path: '/a.ts' }, isError: false },
+          resultSize: 5000,
+        }),
+        createTurn({
+          toolCall: { toolId: '2', toolName: 'Read', input: { file_path: '/b.ts' }, isError: false },
+          resultSize: 3000,
+        }),
+        createTurn({
+          toolCall: { toolId: '3', toolName: 'Read', input: { file_path: '/a.ts' }, isError: false },
+          resultSize: 5000,
+        }),
+      ];
+
+      const stats = aggregateToolSizeStats(turns);
+
+      expect(stats).toHaveLength(1);
+      expect(stats[0].files).toHaveLength(2);
+      expect(stats[0].files[0].path).toBe('/a.ts');
+      expect(stats[0].files[0].sizeBytes).toBe(10000); // 5000 * 2
+      expect(stats[0].files[0].count).toBe(2);
+      expect(stats[0].files[1].path).toBe('/b.ts');
+      expect(stats[0].files[1].sizeBytes).toBe(3000);
+    });
+
+    it('should sort by total size descending', () => {
+      const turns: Turn[] = [
+        createTurn({
+          toolCall: { toolId: '1', toolName: 'Read', input: {}, isError: false },
+          resultSize: 1000,
+        }),
+        createTurn({
+          toolCall: { toolId: '2', toolName: 'Bash', input: {}, isError: false },
+          resultSize: 5000,
+        }),
+      ];
+
+      const stats = aggregateToolSizeStats(turns);
+
+      expect(stats[0].toolName).toBe('Bash');
+      expect(stats[1].toolName).toBe('Read');
+    });
+
+    it('should handle turns without tool calls', () => {
+      const turns: Turn[] = [
+        createTurn({ toolCall: null, resultSize: 5000 }),
+      ];
+
+      const stats = aggregateToolSizeStats(turns);
+
+      expect(stats).toHaveLength(0);
+    });
+
+    it('should handle missing resultSize', () => {
+      const turns: Turn[] = [
+        createTurn({
+          toolCall: { toolId: '1', toolName: 'Read', input: {}, isError: false },
+          // no resultSize
+        }),
+      ];
+
+      const stats = aggregateToolSizeStats(turns);
+
+      expect(stats).toHaveLength(1);
+      expect(stats[0].totalSizeBytes).toBe(0);
+    });
+  });
+
   describe('getTopConsumers', () => {
     it('should return top token consumers sorted by tokens', () => {
       const turns: Turn[] = [
@@ -240,6 +338,88 @@ describe('attribution', () => {
 
       expect(consumers).toHaveLength(1);
       expect(consumers[0].toolName).toBe('Read');
+    });
+  });
+
+  describe('aggregateByUserMessage', () => {
+    it('should group consecutive turns with same prompt', () => {
+      const turns: Turn[] = [
+        createTurn({ turnIndex: 0, userPrompt: 'Fix the bug', tokenDelta: 5000, toolCall: { toolId: '1', toolName: 'Read', input: {}, isError: false } }),
+        createTurn({ turnIndex: 1, userPrompt: 'Fix the bug', tokenDelta: 3000, toolCall: { toolId: '2', toolName: 'Edit', input: {}, isError: false } }),
+        createTurn({ turnIndex: 2, userPrompt: 'Fix the bug', tokenDelta: 2000, toolCall: { toolId: '3', toolName: 'Bash', input: {}, isError: false } }),
+      ];
+
+      const stats = aggregateByUserMessage(turns);
+
+      expect(stats).toHaveLength(1);
+      expect(stats[0].userPrompt).toBe('Fix the bug');
+      expect(stats[0].turnCount).toBe(3);
+      expect(stats[0].totalTokens).toBe(10000);
+      expect(stats[0].toolCount).toBe(3);
+      expect(stats[0].startTurn).toBe(0);
+      expect(stats[0].endTurn).toBe(2);
+    });
+
+    it('should handle turns without userPrompt (initial context)', () => {
+      const turns: Turn[] = [
+        createTurn({ turnIndex: 0, userPrompt: undefined, tokenDelta: 5000 }),
+        createTurn({ turnIndex: 1, userPrompt: undefined, tokenDelta: 3000 }),
+      ];
+
+      const stats = aggregateByUserMessage(turns);
+
+      expect(stats).toHaveLength(1);
+      expect(stats[0].userPrompt).toBe('(initial context)');
+      expect(stats[0].totalTokens).toBe(8000);
+    });
+
+    it('should separate different user prompts', () => {
+      const turns: Turn[] = [
+        createTurn({ turnIndex: 0, userPrompt: 'First request', tokenDelta: 5000 }),
+        createTurn({ turnIndex: 1, userPrompt: 'First request', tokenDelta: 3000 }),
+        createTurn({ turnIndex: 2, userPrompt: 'Second request', tokenDelta: 4000 }),
+        createTurn({ turnIndex: 3, userPrompt: 'Second request', tokenDelta: 2000 }),
+      ];
+
+      const stats = aggregateByUserMessage(turns);
+
+      expect(stats).toHaveLength(2);
+      expect(stats[0].userPrompt).toBe('First request');
+      expect(stats[0].totalTokens).toBe(8000);
+      expect(stats[1].userPrompt).toBe('Second request');
+      expect(stats[1].totalTokens).toBe(6000);
+    });
+
+    it('should count tools correctly', () => {
+      const turns: Turn[] = [
+        createTurn({ turnIndex: 0, userPrompt: 'Test', tokenDelta: 1000, toolCall: { toolId: '1', toolName: 'Read', input: {}, isError: false } }),
+        createTurn({ turnIndex: 1, userPrompt: 'Test', tokenDelta: 1000, toolCall: null }), // No tool
+        createTurn({ turnIndex: 2, userPrompt: 'Test', tokenDelta: 1000, toolCall: { toolId: '2', toolName: 'Bash', input: {}, isError: false } }),
+      ];
+
+      const stats = aggregateByUserMessage(turns);
+
+      expect(stats[0].toolCount).toBe(2);
+    });
+
+    it('should sort by total tokens descending', () => {
+      const turns: Turn[] = [
+        createTurn({ turnIndex: 0, userPrompt: 'Small request', tokenDelta: 100 }),
+        createTurn({ turnIndex: 1, userPrompt: 'Large request', tokenDelta: 10000 }),
+        createTurn({ turnIndex: 2, userPrompt: 'Medium request', tokenDelta: 1000 }),
+      ];
+
+      const stats = aggregateByUserMessage(turns);
+
+      expect(stats).toHaveLength(3);
+      expect(stats[0].userPrompt).toBe('Large request');
+      expect(stats[1].userPrompt).toBe('Medium request');
+      expect(stats[2].userPrompt).toBe('Small request');
+    });
+
+    it('should handle empty turns', () => {
+      const stats = aggregateByUserMessage([]);
+      expect(stats).toHaveLength(0);
     });
   });
 

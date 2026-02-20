@@ -7,7 +7,9 @@ import type {
   SessionReport,
   SessionSegment,
   TopConsumer,
+  UserRequestStats,
   ToolStats,
+  ToolSizeStats,
   FileStats,
   CompactEvent,
 } from '../core/types.js';
@@ -133,12 +135,28 @@ export function formatReport(report: SessionReport): string {
     }
   }
 
-  // Top consumers
-  lines.push(formatLine('│ TOP TOKEN CONSUMERS', width));
+  // Top user requests (replaces misleading "TOP TOKEN CONSUMERS")
+  lines.push(formatLine('│ TOP USER REQUESTS (by token consumption)', width));
   lines.push('├' + '─'.repeat(width - 2) + '┤');
 
-  if (report.topConsumers.length > 0) {
+  if (report.userRequestStats && report.userRequestStats.length > 0) {
     // Table header
+    lines.push(formatLine('│ Request                       │ Turns │ Tokens  │ Tools', width));
+    lines.push('├' + '─'.repeat(width - 2) + '┤');
+
+    for (const req of report.userRequestStats.slice(0, 8)) {
+      // Truncate prompt for display
+      const prompt = req.userPrompt.length > 28
+        ? req.userPrompt.substring(0, 25) + '...'
+        : req.userPrompt;
+      const promptCol = prompt.padEnd(28).substring(0, 28);
+      const turns = String(req.turnCount).padStart(5);
+      const tokens = formatTokens(req.totalTokens).padStart(8);
+      const tools = String(req.toolCount).padStart(5);
+      lines.push(formatLine(`│ ${promptCol} │ ${turns} │ ${tokens} │ ${tools}`, width));
+    }
+  } else if (report.topConsumers.length > 0) {
+    // Fallback to old format if userRequestStats not available
     lines.push(formatLine('│ Action                 │ Tokens  │ Cumulative', width));
     lines.push('├' + '─'.repeat(width - 2) + '┤');
 
@@ -165,6 +183,39 @@ export function formatReport(report: SessionReport): string {
       const tokens = formatTokens(stat.totalContextTokens).padStart(9);
       const pct = formatPercent(stat.percentOfSession).padStart(7);
       lines.push(formatLine(`│ ${tool} │ ${count} │ ${tokens} │ ${pct}`, width));
+    }
+  }
+
+  // By tool type (file size) - shows actual content fed into context
+  lines.push('├' + '─'.repeat(width - 2) + '┤');
+  lines.push(formatLine('│ BY TOOL TYPE (File Size)', width));
+  lines.push('├' + '─'.repeat(width - 2) + '┤');
+
+  if (report.toolSizeStats && report.toolSizeStats.length > 0) {
+    for (const stat of report.toolSizeStats.slice(0, 4)) {
+      // Tool header with total stats
+      const fileCount = `${stat.files.length} file${stat.files.length !== 1 ? 's' : ''}`;
+      const totalSize = formatKB(stat.totalSizeBytes);
+      lines.push(formatLine(`│ ${stat.toolName} (${fileCount}, ${totalSize} total)`, width));
+
+      // Show top 5 files per tool
+      const topFiles = stat.files.slice(0, 5);
+      for (const file of topFiles) {
+        const pathParts = file.path.split(/[/\\]/);
+        const shortPath = pathParts.slice(-2).join('/');
+        const path = shortPath.substring(0, 32);
+        const size = formatKB(file.sizeBytes).padStart(9);
+        const count = file.count > 1 ? ` (${file.count}x)` : '';
+        lines.push(formatLine(`│   ${path.padEnd(34)} ${size}${count}`, width));
+      }
+
+      // Show "+N more" indicator if there are more files
+      const remaining = stat.files.length - topFiles.length;
+      if (remaining > 0) {
+        lines.push(formatLine(`│   ... (+${remaining} more)`, width));
+      }
+
+      lines.push('├' + '─'.repeat(width - 2) + '┤');
     }
   }
 
@@ -353,7 +404,17 @@ export function formatMarkdown(report: SessionReport): string {
   lines.push(`| Estimated Cost | ${formatCurrency(report.estimatedCost)} |`);
   lines.push('');
 
-  if (report.topConsumers.length > 0) {
+  if (report.userRequestStats && report.userRequestStats.length > 0) {
+    lines.push(`## Top User Requests`);
+    lines.push('');
+    lines.push(`| Request | Turns | Tokens | Tools |`);
+    lines.push(`|---------|-------|--------|-------|`);
+    for (const req of report.userRequestStats.slice(0, 10)) {
+      const prompt = req.userPrompt.length > 50 ? req.userPrompt.substring(0, 47) + '...' : req.userPrompt;
+      lines.push(`| ${prompt} | ${req.turnCount} | ${formatTokens(req.totalTokens)} | ${req.toolCount} |`);
+    }
+    lines.push('');
+  } else if (report.topConsumers.length > 0) {
     lines.push(`## Top Token Consumers`);
     lines.push('');
     lines.push(`| Action | Tokens | Cumulative |`);
@@ -371,6 +432,90 @@ export function formatMarkdown(report: SessionReport): string {
   for (const stat of report.toolStats) {
     lines.push(`| ${stat.toolName} | ${stat.count} | ${formatTokens(stat.totalContextTokens)} | ${formatPercent(stat.percentOfSession)} |`);
   }
+
+  return lines.join('\n');
+}
+
+/**
+ * Format a size-based report (emphasizes content size over token deltas)
+ */
+export function formatSizeReport(report: SessionReport): string {
+  const lines: string[] = [];
+  const width = 80;
+
+  // Header
+  lines.push('╭' + '─'.repeat(width - 2) + '╮');
+  lines.push(formatLine('│ CtxMap - Size Analysis (Content Fed Into Context)', width));
+  lines.push(
+    formatLine(
+      `│ Session: ${report.sessionId.substring(0, 8)}... | ${report.totalTurns} turns | Duration: ${report.duration}`,
+      width
+    )
+  );
+  lines.push('├' + '─'.repeat(width - 2) + '┤');
+
+  // Total size
+  const totalSizeBytes = report.toolSizeStats.reduce((sum, t) => sum + t.totalSizeBytes, 0);
+  lines.push(formatLine(`│ TOTAL CONTENT LOADED: ${formatKB(totalSizeBytes)}`, width));
+  lines.push('├' + '─'.repeat(width - 2) + '┤');
+
+  // By tool type (size)
+  lines.push(formatLine('│ BY TOOL TYPE (File Size)', width));
+  lines.push('├' + '─'.repeat(width - 2) + '┤');
+
+  if (report.toolSizeStats && report.toolSizeStats.length > 0) {
+    lines.push(formatLine('│ Tool           │ Count │ Total Size │ Avg Size', width));
+    lines.push('├' + '─'.repeat(width - 2) + '┤');
+
+    for (const stat of report.toolSizeStats) {
+      const tool = stat.toolName.padEnd(14).substring(0, 14);
+      const count = formatNumber(stat.count).padStart(5);
+      const total = formatKB(stat.totalSizeBytes).padStart(10);
+      const avg = formatKB(stat.avgSizeBytes).padStart(9);
+      lines.push(formatLine(`│ ${tool} │ ${count} │ ${total} │ ${avg}`, width));
+    }
+  }
+
+  // Top files by size per tool
+  lines.push('├' + '─'.repeat(width - 2) + '┤');
+  lines.push(formatLine('│ TOP FILES BY SIZE (per tool)', width));
+  lines.push('├' + '─'.repeat(width - 2) + '┤');
+
+  for (const toolStat of report.toolSizeStats.slice(0, 5)) {
+    if (toolStat.files.length === 0) continue;
+
+    lines.push(formatLine(`│ ${toolStat.toolName}:`, width));
+
+    for (const file of toolStat.files.slice(0, 3)) {
+      const pathParts = file.path.split(/[/\\]/);
+      const shortPath = pathParts.slice(-2).join('/');
+      const path = shortPath.substring(0, 40);
+      const size = formatKB(file.sizeBytes).padStart(10);
+      const count = `(${file.count}x)`.padStart(6);
+      lines.push(formatLine(`│   ${path.padEnd(42)} ${size} ${count}`, width));
+    }
+  }
+
+  // Summary
+  lines.push('├' + '─'.repeat(width - 2) + '┤');
+  lines.push(formatLine('│ COMPARISON: Size vs Token Delta', width));
+  lines.push('├' + '─'.repeat(width - 2) + '┤');
+  lines.push(
+    formatLine(
+      `│ Total Size Loaded: ${formatKB(totalSizeBytes)} | Total Token Delta: ${formatTokens(report.totalContextTokens)}`,
+      width
+    )
+  );
+  lines.push(
+    formatLine(
+      `│ Note: Token delta = model response cost, Size = actual content fed`,
+      width
+    )
+  );
+  lines.push(formatLine(`│ Peak Context: ${formatTokens(report.peakContext)} | Cost: ${formatCurrency(report.estimatedCost)}`, width));
+
+  // Footer
+  lines.push('╰' + '─'.repeat(width - 2) + '╯');
 
   return lines.join('\n');
 }
