@@ -12,6 +12,7 @@ CtxMap is a CLI tool for analyzing Claude Code token usage from JSONL transcript
 - **Mass aggregation** - Aggregate all sessions to find patterns and insights
 - **File interaction tracking** - See combined Read/Edit/Write stats per file
 - **High churn detection** - Identify files edited frequently across sessions
+- **Interactive dashboard** - Visualize token usage with charts and tables
 
 ## Key Commands
 
@@ -41,6 +42,11 @@ ctxmap compare --latest 5
 ctxmap aggregate
 ctxmap aggregate --since 2025-01-01
 ctxmap aggregate --format json
+
+# Interactive dashboard
+ctxmap serve
+ctxmap serve -p 8080
+ctxmap serve --project CodeSignal
 ```
 
 ## Output Formats
@@ -56,9 +62,14 @@ src/
 │   ├── parser.ts      # JSONL parsing, turn extraction
 │   ├── attribution.ts # Token delta calculation, aggregation, compact detection
 │   └── aggregation.ts # Cross-session aggregation, pattern detection, file interaction tracking
-└── cli/
-    ├── index.ts       # CLI entry point (analyze, turns, sessions, compare, aggregate)
-    └── formatters.ts  # Output formatting (tables, colors, bars)
+├── cli/
+│   ├── index.ts       # CLI entry point (analyze, turns, sessions, compare, aggregate, serve)
+│   ├── formatters.ts  # Output formatting (tables, colors, bars)
+│   └── server.ts      # Dashboard server (generates data.json, starts Vite)
+└── web/               # React dashboard
+    ├── App.tsx        # Main app with tab navigation
+    ├── components/    # Overview, Timeline, FileTable, ToolBreakdown, Insights
+    └── hooks/         # useAggregation hook for data fetching
 ```
 
 ## Key Concepts

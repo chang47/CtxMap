@@ -4,6 +4,9 @@ node_modules/
 # Build output
 dist/
 
+# Generated dashboard data
+src/web/public/data.json
+
 # IDE
 .idea/
 .vscode/

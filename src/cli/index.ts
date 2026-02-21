@@ -28,6 +28,7 @@ import {
   formatMassAggregationJson,
   formatMassAggregationMarkdown,
 } from './formatters.js';
+import { startServer } from './server.js';
 
 const program = new Command();
 
@@ -288,6 +289,26 @@ program
       }
     } catch (error) {
       console.error('Error aggregating sessions:', error);
+      process.exit(1);
+    }
+  });
+
+// Serve command - start interactive dashboard
+program
+  .command('serve')
+  .description('Start interactive dashboard')
+  .option('-p, --port <port>', 'Port number', '3000')
+  .option('--project <path>', 'Filter to specific project')
+  .option('--since <date>', 'Only include sessions since date (YYYY-MM-DD)')
+  .action(async (options) => {
+    try {
+      const port = parseInt(options.port, 10) || 3000;
+      await startServer(port, {
+        projectPath: options.project,
+        since: options.since,
+      });
+    } catch (error) {
+      console.error('Error starting server:', error);
       process.exit(1);
     }
   });

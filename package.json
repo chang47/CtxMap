@@ -9,7 +9,10 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:web": "vite build",
+    "build:all": "npm run build && npm run build:web",
     "dev": "tsc --watch",
+    "dev:web": "vite",
     "start": "node dist/cli/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -26,13 +29,24 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.0",
     "@types/node": "^22.13.4",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "autoprefixer": "^10.4.24",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.2.0",
     "typescript": "^5.7.3",
+    "vite": "^7.3.1",
     "vitest": "^3.0.5"
   },
   "dependencies": {
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
-    "glob": "^11.0.1"
+    "glob": "^11.0.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "recharts": "^3.7.0"
   }
 }

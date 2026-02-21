@@ -161,15 +161,6 @@ Example output:
 4. Detects compact events (>50% context drop)
 5. Estimates costs using Claude Opus 4.6 pricing
 
-## Development
-
-```bash
-npm run build      # Compile TypeScript
-npm run dev        # Watch mode
-npm test           # Run tests
-npm run check:all  # Type check + tests
-```
-
 ## Data Location
 
 Claude Code stores transcripts at:
@@ -180,11 +171,47 @@ Claude Code stores transcripts at:
 
 Sessions are NOT auto-deleted - they accumulate indefinitely.
 
+## Interactive Dashboard
+
+Visualize your token usage with an interactive web dashboard:
+
+```bash
+# Start dashboard at localhost:3000
+ctxmap serve
+
+# Use a different port
+ctxmap serve -p 8080
+
+# Filter by project or date
+ctxmap serve --project CodeSignal
+ctxmap serve --since 2025-01-01
+```
+
+**Dashboard Features:**
+- **Overview**: Summary cards with sessions, turns, cost, tokens, and cache performance
+- **Timeline**: Weekly cost charts, daily token trends, sessions per day
+- **Files**: Interactive table with search, filter (Read/Edit/Write), and sort
+- **Tools**: Pie/bar charts for tool distribution, detailed tool stats
+- **Insights**: Auto-detected patterns with severity levels and recommendations
+
+The dashboard runs locally - your data never leaves your machine.
+
+## Development
+
+```bash
+npm run build      # Compile TypeScript CLI
+npm run build:web  # Build web dashboard for production
+npm run dev        # Watch mode for CLI
+npm run dev:web    # Start Vite dev server for dashboard
+npm test           # Run tests
+npm run check:all  # Type check + tests
+```
+
 ## Future Plans
 
 - [x] ~~Session history trends over time~~ (aggregate command)
 - [x] ~~Optimization suggestions (auto-detect inefficient patterns)~~ (insights)
-- [ ] HTML dashboard for visual exploration
+- [x] ~~HTML dashboard for visual exploration~~ (serve command)
 - [ ] Hook integration for auto-analysis after sessions
 - [ ] Tauri desktop app using JSON output from aggregate
 
