@@ -9,6 +9,9 @@ CtxMap is a CLI tool for analyzing Claude Code token usage from JSONL transcript
 - **Cost estimation** - Calculate costs from token counts
 - **Turn-by-turn breakdown** - Like Chrome DevTools timeline for tokens
 - **Compact detection** - Identify when context was compacted and how much was saved
+- **Mass aggregation** - Aggregate all sessions to find patterns and insights
+- **File interaction tracking** - See combined Read/Edit/Write stats per file
+- **High churn detection** - Identify files edited frequently across sessions
 
 ## Key Commands
 
@@ -33,6 +36,11 @@ ctxmap sessions
 
 # Compare multiple sessions
 ctxmap compare --latest 5
+
+# Mass aggregation with pattern detection
+ctxmap aggregate
+ctxmap aggregate --since 2025-01-01
+ctxmap aggregate --format json
 ```
 
 ## Output Formats
@@ -44,11 +52,12 @@ All commands support `--format json|markdown` for export.
 ```
 src/
 ├── core/
-│   ├── types.ts       # Type definitions (Turn, SessionReport, etc.)
+│   ├── types.ts       # Type definitions (Turn, SessionReport, MassAggregation, FileInteractionPattern, etc.)
 │   ├── parser.ts      # JSONL parsing, turn extraction
-│   └── attribution.ts # Token delta calculation, aggregation, compact detection
+│   ├── attribution.ts # Token delta calculation, aggregation, compact detection
+│   └── aggregation.ts # Cross-session aggregation, pattern detection, file interaction tracking
 └── cli/
-    ├── index.ts       # CLI entry point (analyze, turns, sessions, compare)
+    ├── index.ts       # CLI entry point (analyze, turns, sessions, compare, aggregate)
     └── formatters.ts  # Output formatting (tables, colors, bars)
 ```
 
@@ -56,6 +65,7 @@ src/
 
 - **Session** = One full conversation (one JSONL file in `~/.claude/projects/`)
 - **Turn** = One assistant message with token usage data
+- **FileInteractionPattern** = Combined Read/Edit/Write stats for a file across all sessions
 - A single user message can result in multiple turns (if Claude makes tool calls)
 
 ## Data Source

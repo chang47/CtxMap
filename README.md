@@ -81,6 +81,61 @@ ctxmap compare --latest 5
 ctxmap compare --sessions abc123,def456
 ```
 
+### Mass Aggregation & Pattern Detection
+
+Aggregate all sessions to find patterns, spot anomalies, and get actionable insights.
+
+```bash
+# Aggregate all sessions across all projects
+ctxmap aggregate
+
+# Filter by project name (substring match)
+ctxmap aggregate --project CodeSignal
+
+# Filter by date
+ctxmap aggregate --since 2025-01-01
+
+# Output formats (for web UI consumption)
+ctxmap aggregate --format json
+ctxmap aggregate --format markdown
+```
+
+Example output:
+```
+╭────────────────────────────────────────────────────────────────────╮
+│ CtxMap - Mass Aggregation (45 sessions, 12 projects)               │
+│ Date range: 2025-01-15 to 2025-02-20                               │
+├────────────────────────────────────────────────────────────────────┤
+│ OVERVIEW                                                           │
+│   Sessions: 45 | Turns: 1,247 | Cost: $234.56                      │
+│   Input: 4.2M | Output: 1.8M | Cache Read: 12.3M                   │
+├────────────────────────────────────────────────────────────────────┤
+│ TOP FILES ACROSS ALL TOOLS                                         │
+│   convex/schema.ts    23 total │ 15R 6E 2W │ 12 sess │ 2.3KB       │
+│   CLAUDE.md           18 total │ 10R 4E 4W │  9 sess │ 4.1KB       │
+│   index.ts            15 total │  8R 5E 2W │  7 sess │ 1.8KB       │
+├────────────────────────────────────────────────────────────────────┤
+│ INSIGHTS                                                           │
+│ 📌 FREQUENT FILE (notice)                                          │
+│   convex/schema.ts appears in 27% of your sessions                 │
+│   -> Consider adding to CLAUDE.md for persistent context           │
+│ 🔧 HIGH CHURN (info)                                               │
+│   5 files edited 5+ times across sessions                          │
+│   -> Consider if these files need refactoring or better tooling    │
+├────────────────────────────────────────────────────────────────────┤
+│ USAGE BY WEEK                                                      │
+│   Week of Jan 20:   8 sessions | $45.23 █████████████████████      │
+│   Week of Jan 27:   6 sessions | $38.12 ███████████████            │
+╰────────────────────────────────────────────────────────────────────╯
+```
+
+**Key Features:**
+- **File Interactions**: See which files you interact with most (Read/Edit/Write breakdown)
+- **Insights**: Auto-detected patterns with actionable recommendations
+- **High Churn Detection**: Identify files edited frequently across sessions
+- **Weekly Trends**: Cost and session count by week
+- **No Speculative Costs**: Only factual counts and comparisons (not dollar estimates per action)
+
 ## Column Reference
 
 | Column | Meaning |
@@ -127,10 +182,11 @@ Sessions are NOT auto-deleted - they accumulate indefinitely.
 
 ## Future Plans
 
+- [x] ~~Session history trends over time~~ (aggregate command)
+- [x] ~~Optimization suggestions (auto-detect inefficient patterns)~~ (insights)
 - [ ] HTML dashboard for visual exploration
-- [ ] Session history trends over time
-- [ ] Optimization suggestions (auto-detect inefficient patterns)
 - [ ] Hook integration for auto-analysis after sessions
+- [ ] Tauri desktop app using JSON output from aggregate
 
 ## License
 

@@ -12,6 +12,9 @@ import type {
   ToolSizeStats,
   FileStats,
   CompactEvent,
+  MassAggregation,
+  InsightPattern,
+  FileInteractionPattern,
 } from '../core/types.js';
 
 const PERFORMANCE_ZONES = {
@@ -657,6 +660,287 @@ export function formatTurnByTurn(report: SessionReport): string {
   lines.push('╞' + '─'.repeat(width - 2) + '╡');
   lines.push(formatLine(`│ SUMMARY: Peak ${formatTokens(report.peakContext)} (${formatPercent(report.peakContextPercent)}) | Total Size: (${formatKB(totalKB)}) | Cost: ${formatCurrency(report.estimatedCost)}`, width));
   lines.push('╰' + '─'.repeat(width - 2) + '╯');
+
+  return lines.join('\n');
+}
+
+/**
+ * Format mass aggregation for terminal output
+ */
+export function formatMassAggregation(agg: MassAggregation): string {
+  const lines: string[] = [];
+  const width = 70;
+
+  if (agg.totalSessions === 0) {
+    return 'No sessions found to aggregate.';
+  }
+
+  // Header
+  lines.push('╭' + '─'.repeat(width - 2) + '╮');
+  lines.push(formatLine(
+    `│ CtxMap - Mass Aggregation (${agg.totalSessions} sessions, ${agg.projects.length} projects)`,
+    width
+  ));
+  lines.push(formatLine(`│ Date range: ${agg.startDate || 'N/A'} to ${agg.endDate || 'N/A'}`, width));
+  lines.push('├' + '─'.repeat(width - 2) + '┤');
+
+  // Overview
+  lines.push(formatLine('│ OVERVIEW', width));
+  lines.push(formatLine(
+    `│   Sessions: ${formatNumber(agg.totalSessions)} | Turns: ${formatNumber(agg.totalTurns)} | Cost: ${formatCurrency(agg.totalCost)}`,
+    width
+  ));
+  lines.push(formatLine(
+    `│   Input: ${formatTokens(agg.totalInputTokens)} | Output: ${formatTokens(agg.totalOutputTokens)} | Cache Read: ${formatTokens(agg.totalCacheRead)}`,
+    width
+  ));
+
+  // BY TOOL TYPE - detailed breakdown
+  if (agg.toolPatterns.length > 0) {
+    lines.push('├' + '─'.repeat(width - 2) + '┤');
+    lines.push(formatLine('│ BY TOOL TYPE', width));
+
+    // Show top tools with file breakdowns
+    for (const tool of agg.toolPatterns.slice(0, 5)) {
+      lines.push('├' + '─'.repeat(width - 2) + '┤');
+      lines.push(formatLine(
+        `│ ${tool.toolName} (${formatNumber(tool.totalCount)} uses, ${tool.sessionCount} sessions)`,
+        width
+      ));
+
+      // Stats line
+      const sizeStr = formatKB(tool.totalOutputBytes);
+      const ctxStr = formatTokens(tool.totalContextTokens);
+      lines.push(formatLine(
+        `│   Size: ${sizeStr} total | Context: ${ctxStr} tokens`,
+        width
+      ));
+
+      // Top files for this tool (if any)
+      if (tool.files.length > 0) {
+        const topFiles = tool.files.slice(0, 10);
+        for (const file of topFiles) {
+          const path = shortenPath(file.path, 24);
+          const countStr = `${formatNumber(file.count)}x`.padStart(5);
+          const sessStr = `${file.sessionCount} sess`;
+          const sizeStr = formatKB(file.totalSizeBytes).padStart(8);
+          lines.push(formatLine(
+            `│     ${path.padEnd(24)} ${countStr} × ${sessStr.padEnd(7)} ${sizeStr}`,
+            width
+          ));
+        }
+        if (tool.files.length > 10) {
+          lines.push(formatLine(`│     ... (+${tool.files.length - 10} more)`, width));
+        }
+      }
+    }
+  }
+
+  // Top files across all tools (Read + Edit + Write)
+  lines.push('├' + '─'.repeat(width - 2) + '┤');
+  lines.push(formatLine('│ TOP FILES ACROSS ALL TOOLS', width));
+
+  const topInteractions = (agg.fileInteractionPatterns || []).slice(0, 5);
+  if (topInteractions.length > 0) {
+    for (const file of topInteractions) {
+      const path = shortenPath(file.filePath, 26);
+      const totalStr = `${file.totalInteractions} total`.padStart(9);
+      const breakdown = `${file.readCount}R ${file.editCount}E ${file.writeCount}W`;
+      const sessions = `${file.sessionCount} sess`;
+      const size = formatKB(file.totalSizeBytes);
+      lines.push(formatLine(`│   ${path.padEnd(26)} ${totalStr} │ ${breakdown.padEnd(9)} │ ${sessions.padEnd(6)} │ ${size}`, width));
+    }
+  } else {
+    lines.push(formatLine('│   No file data available', width));
+  }
+
+  // Insights
+  if (agg.insights.length > 0) {
+    lines.push('├' + '─'.repeat(width - 2) + '┤');
+    lines.push(formatLine('│ INSIGHTS', width));
+
+    for (const insight of agg.insights.slice(0, 6)) {
+      const icon = getInsightIcon(insight.type);
+      const severity = insight.severity.toUpperCase();
+      lines.push('├' + '─'.repeat(width - 2) + '┤');
+      lines.push(formatLine(`│ ${icon} ${insight.type.replace(/_/g, ' ').toUpperCase()} (${severity})`, width));
+      lines.push(formatLine(`│   ${insight.description}`, width));
+      lines.push(formatLine(`│   -> ${insight.recommendation}`, width));
+    }
+  }
+
+  // Usage by week (aggregate daily to weekly)
+  lines.push('├' + '─'.repeat(width - 2) + '┤');
+  lines.push(formatLine('│ USAGE BY WEEK', width));
+
+  const weeklyTotals = aggregateToWeekly(agg.dailyTotals);
+  for (const week of weeklyTotals.slice(-6)) {
+    const weekLabel = `Week of ${week.date}:`.padEnd(16);
+    const sessions = `${week.sessions} sess`.padStart(8);
+    const cost = formatCurrency(week.cost).padStart(8);
+    const bar = createProportionalBar(week.cost, Math.max(...weeklyTotals.map(w => w.cost)), 20);
+    lines.push(formatLine(`│   ${weekLabel} ${sessions} | ${cost} ${bar}`, width));
+  }
+
+  // Footer
+  lines.push('╰' + '─'.repeat(width - 2) + '╯');
+
+  return lines.join('\n');
+}
+
+/**
+ * Get icon for insight type
+ */
+function getInsightIcon(type: InsightPattern['type']): string {
+  switch (type) {
+    case 'frequent_file': return '📌';
+    case 'test_churn': return '🔄';
+    case 'context_bloat': return '📊';
+    case 'long_session': return '⏱️';
+    case 'high_churn': return '🔧';
+    default: return '💡';
+  }
+}
+
+/**
+ * Shorten a file path for display
+ */
+function shortenPath(filePath: string, maxLength: number): string {
+  const parts = filePath.split(/[/\\]/);
+  if (parts.length <= 2) {
+    return filePath.length > maxLength ? filePath.substring(0, maxLength - 3) + '...' : filePath;
+  }
+  const shortened = parts.slice(-2).join('/');
+  return shortened.length > maxLength ? shortened.substring(0, maxLength - 3) + '...' : shortened;
+}
+
+/**
+ * Aggregate daily totals to weekly
+ */
+function aggregateToWeekly(dailyTotals: Array<{ date: string; sessions: number; cost: number; inputTokens: number; outputTokens: number; peakContext: number }>): Array<{ date: string; sessions: number; cost: number }> {
+  const weekMap = new Map<string, { sessions: number; cost: number }>();
+
+  for (const day of dailyTotals) {
+    // Get the Monday of the week
+    const date = new Date(day.date);
+    const dayOfWeek = date.getDay();
+    const diff = date.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+    const monday = new Date(date.setDate(diff));
+    const weekKey = monday.toISOString().substring(0, 10);
+
+    const existing = weekMap.get(weekKey) || { sessions: 0, cost: 0 };
+    existing.sessions += day.sessions;
+    existing.cost += day.cost;
+    weekMap.set(weekKey, existing);
+  }
+
+  return Array.from(weekMap.entries())
+    .map(([date, data]) => ({ date, ...data }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Create a proportional bar (based on value relative to max)
+ */
+function createProportionalBar(value: number, maxValue: number, width: number): string {
+  if (maxValue === 0) return '░'.repeat(width);
+  const filled = Math.round((value / maxValue) * width);
+  return '█'.repeat(filled) + '░'.repeat(width - filled);
+}
+
+/**
+ * Format mass aggregation as JSON
+ */
+export function formatMassAggregationJson(agg: MassAggregation): string {
+  return JSON.stringify(agg, null, 2);
+}
+
+/**
+ * Format mass aggregation as Markdown
+ */
+export function formatMassAggregationMarkdown(agg: MassAggregation): string {
+  const lines: string[] = [];
+
+  lines.push(`# CtxMap - Mass Aggregation`);
+  lines.push('');
+  lines.push(`**Sessions:** ${agg.totalSessions} | **Projects:** ${agg.projects.length}`);
+  lines.push(`**Date Range:** ${agg.startDate || 'N/A'} to ${agg.endDate || 'N/A'}`);
+  lines.push('');
+
+  lines.push(`## Overview`);
+  lines.push('');
+  lines.push(`| Metric | Value |`);
+  lines.push(`|--------|-------|`);
+  lines.push(`| Total Turns | ${formatNumber(agg.totalTurns)} |`);
+  lines.push(`| Total Cost | ${formatCurrency(agg.totalCost)} |`);
+  lines.push(`| Total Input | ${formatTokens(agg.totalInputTokens)} |`);
+  lines.push(`| Total Output | ${formatTokens(agg.totalOutputTokens)} |`);
+  lines.push(`| Cache Read | ${formatTokens(agg.totalCacheRead)} |`);
+  lines.push('');
+
+  // Tool Details
+  if (agg.toolPatterns.length > 0) {
+    lines.push(`## By Tool Type`);
+    lines.push('');
+
+    for (const tool of agg.toolPatterns.slice(0, 5)) {
+      lines.push(`### ${tool.toolName}`);
+      lines.push('');
+      lines.push(`- **Uses:** ${formatNumber(tool.totalCount)} across ${tool.sessionCount} sessions`);
+      lines.push(`- **Size:** ${formatKB(tool.totalOutputBytes)} total`);
+      lines.push(`- **Context:** ${formatTokens(tool.totalContextTokens)} tokens`);
+
+      if (tool.files.length > 0) {
+        lines.push('');
+        lines.push(`| File | Count | Sessions | Size |`);
+        lines.push(`|------|-------|----------|------|`);
+        for (const file of tool.files.slice(0, 10)) {
+          lines.push(`| ${shortenPath(file.path, 40)} | ${file.count} | ${file.sessionCount} | ${formatKB(file.totalSizeBytes)} |`);
+        }
+        if (tool.files.length > 10) {
+          lines.push(`| ... (+${tool.files.length - 10} more) | | | |`);
+        }
+      }
+      lines.push('');
+    }
+  }
+
+  if (agg.fileInteractionPatterns && agg.fileInteractionPatterns.length > 0) {
+    lines.push(`## Top Files Across All Tools`);
+    lines.push('');
+    lines.push(`| File | Total | R/E/W | Sessions | Size |`);
+    lines.push(`|------|-------|-------|----------|------|`);
+    for (const file of agg.fileInteractionPatterns.slice(0, 10)) {
+      const breakdown = `${file.readCount}R/${file.editCount}E/${file.writeCount}W`;
+      lines.push(`| ${shortenPath(file.filePath, 40)} | ${file.totalInteractions} | ${breakdown} | ${file.sessionCount} | ${formatKB(file.totalSizeBytes)} |`);
+    }
+    lines.push('');
+  }
+
+  if (agg.insights.length > 0) {
+    lines.push(`## Insights`);
+    lines.push('');
+    for (const insight of agg.insights) {
+      const icon = getInsightIcon(insight.type);
+      lines.push(`### ${icon} ${insight.type.replace(/_/g, ' ').toUpperCase()} (${insight.severity})`);
+      lines.push('');
+      lines.push(`${insight.description}`);
+      lines.push('');
+      lines.push(`**Recommendation:** ${insight.recommendation}`);
+      lines.push('');
+    }
+  }
+
+  const weeklyTotals = aggregateToWeekly(agg.dailyTotals);
+  if (weeklyTotals.length > 0) {
+    lines.push(`## Weekly Usage`);
+    lines.push('');
+    lines.push(`| Week | Sessions | Cost |`);
+    lines.push(`|------|----------|------|`);
+    for (const week of weeklyTotals) {
+      lines.push(`| ${week.date} | ${week.sessions} | ${formatCurrency(week.cost)} |`);
+    }
+  }
 
   return lines.join('\n');
 }

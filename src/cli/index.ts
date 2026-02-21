@@ -15,6 +15,7 @@ import {
   getSessionMetadata,
 } from '../core/parser.js';
 import { generateReport } from '../core/attribution.js';
+import { aggregateAllSessions } from '../core/aggregation.js';
 import {
   formatReport,
   formatSessionList,
@@ -23,6 +24,9 @@ import {
   formatMarkdown,
   formatTurnByTurn,
   formatSizeReport,
+  formatMassAggregation,
+  formatMassAggregationJson,
+  formatMassAggregationMarkdown,
 } from './formatters.js';
 
 const program = new Command();
@@ -252,6 +256,38 @@ program
       console.log(formatComparison(reports));
     } catch (error) {
       console.error('Error comparing sessions:', error);
+      process.exit(1);
+    }
+  });
+
+// Aggregate command
+program
+  .command('aggregate')
+  .description('Aggregate all sessions and find patterns')
+  .option('-p, --project <path>', 'Filter to specific project (substring match)')
+  .option('--since <date>', 'Only include sessions since date (YYYY-MM-DD)')
+  .option('-f, --format <format>', 'Output format (table, json, markdown)', 'table')
+  .action(async (options) => {
+    try {
+      console.error('Aggregating sessions...');
+      const aggregation = await aggregateAllSessions({
+        projectPath: options.project,
+        since: options.since,
+        format: options.format,
+      });
+
+      switch (options.format) {
+        case 'json':
+          console.log(formatMassAggregationJson(aggregation));
+          break;
+        case 'markdown':
+          console.log(formatMassAggregationMarkdown(aggregation));
+          break;
+        default:
+          console.log(formatMassAggregation(aggregation));
+      }
+    } catch (error) {
+      console.error('Error aggregating sessions:', error);
       process.exit(1);
     }
   });
