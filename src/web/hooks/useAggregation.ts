@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MassAggregation } from '../../core/types';
 
 interface UseAggregationOptions {
@@ -16,14 +16,29 @@ export function useAggregation(options: UseAggregationOptions = {}) {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const fetchData = useCallback(async () => {
+  // Track last seen Last-Modified to avoid unnecessary updates
+  const lastModifiedRef = useRef<string | null>(null);
+
+  const fetchData = useCallback(async (force = false) => {
     try {
-      // Add cache-busting query param for live mode
-      const url = live ? `/data.json?t=${Date.now()}` : '/data.json';
-      const response = await fetch(url);
+      const response = await fetch('/data.json');
+
       if (!response.ok) {
         throw new Error(`Failed to fetch data: ${response.statusText}`);
       }
+
+      // Check Last-Modified header to avoid re-rendering if unchanged
+      const lastModified = response.headers.get('Last-Modified');
+      if (!force && lastModified && lastModified === lastModifiedRef.current) {
+        // Data unchanged, skip update
+        return;
+      }
+
+      // Store the Last-Modified value for next comparison
+      if (lastModified) {
+        lastModifiedRef.current = lastModified;
+      }
+
       const json = await response.json();
       setData(json);
       setLastUpdated(new Date());
@@ -33,20 +48,26 @@ export function useAggregation(options: UseAggregationOptions = {}) {
     } finally {
       setLoading(false);
     }
-  }, [live]);
+  }, []);
 
   // Initial fetch
   useEffect(() => {
-    fetchData();
+    fetchData(true); // Force initial fetch
   }, [fetchData]);
 
   // Polling for live mode
   useEffect(() => {
     if (!live) return;
 
-    const pollInterval = setInterval(fetchData, interval);
+    const pollInterval = setInterval(() => fetchData(false), interval);
     return () => clearInterval(pollInterval);
   }, [live, interval, fetchData]);
 
-  return { data, loading, error, lastUpdated, refresh: fetchData };
+  return {
+    data,
+    loading,
+    error,
+    lastUpdated,
+    refresh: () => fetchData(true), // Manual refresh always forces update
+  };
 }
