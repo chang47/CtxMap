@@ -1,11 +1,13 @@
 /**
  * Development server for CtxMap Dashboard
- * Generates data.json and starts Vite dev server
+ * Generates data.json and starts Vite dev server with live reload
  */
 
 import { spawn } from 'child_process';
 import { writeFile, mkdir } from 'fs/promises';
+import { watch, existsSync } from 'fs';
 import { join, dirname } from 'path';
+import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import type { MassAggregation, AggregateOptions } from '../core/types.js';
 import { aggregateAllSessions } from '../core/aggregation.js';
@@ -13,35 +15,51 @@ import { aggregateAllSessions } from '../core/aggregation.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
- * Start the dashboard server
+ * Start the dashboard server with live reload
  */
 export async function startServer(port: number, options: AggregateOptions = {}): Promise<void> {
-  // Run aggregation at startup
-  console.error('Loading session data...');
-  let aggregationData: MassAggregation;
-
-  try {
-    aggregationData = await aggregateAllSessions(options);
-    console.error(`Loaded ${aggregationData.totalSessions} sessions`);
-  } catch (err) {
-    console.error('Failed to load session data:', err);
-    aggregationData = getEmptyAggregation();
-  }
-
-  // Write data.json to src/web/public for Vite to serve
   const publicDir = join(__dirname, '../../src/web/public');
   const dataPath = join(publicDir, 'data.json');
 
-  try {
-    await mkdir(publicDir, { recursive: true });
-    await writeFile(dataPath, JSON.stringify(aggregationData, null, 2));
-    console.error(`Generated data.json`);
-  } catch (err) {
-    console.error('Failed to write data.json:', err);
+  // Initial data load
+  await regenerateData(options, dataPath, publicDir);
+
+  // Start file watcher for live reload
+  const claudeProjectsDir = join(homedir(), '.claude', 'projects');
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  if (existsSync(claudeProjectsDir)) {
+    console.error(`Watching for changes in ${claudeProjectsDir}`);
+
+    const watcher = watch(claudeProjectsDir, { recursive: true }, (eventType, filename) => {
+      if (!filename) return;
+
+      // Only react to .jsonl file changes
+      if (filename.endsWith('.jsonl')) {
+        // Debounce: wait 2 seconds after last change before regenerating
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          console.error(`\nDetected change: ${filename}`);
+          await regenerateData(options, dataPath, publicDir);
+        }, 2000);
+      }
+    });
+
+    watcher.on('error', (err) => {
+      console.error('File watcher error:', err);
+    });
+
+    process.on('SIGINT', () => {
+      watcher.close();
+      process.exit(0);
+    });
+  } else {
+    console.error(`Warning: ${claudeProjectsDir} not found, live reload disabled`);
   }
 
   // Start Vite dev server
-  console.error(`Starting dashboard at http://localhost:${port}`);
+  console.error(`\nStarting dashboard at http://localhost:${port}`);
+  console.error('Live reload enabled - data will update as you use Claude Code\n');
 
   const vite = spawn('npx', ['vite', '--port', String(port)], {
     stdio: 'inherit',
@@ -56,6 +74,27 @@ export async function startServer(port: number, options: AggregateOptions = {}):
     console.error('Failed to start Vite:', err);
     process.exit(1);
   });
+}
+
+/**
+ * Regenerate data.json from all sessions
+ */
+async function regenerateData(
+  options: AggregateOptions,
+  dataPath: string,
+  publicDir: string
+): Promise<void> {
+  try {
+    const aggregationData = await aggregateAllSessions(options);
+
+    await mkdir(publicDir, { recursive: true });
+    await writeFile(dataPath, JSON.stringify(aggregationData, null, 2));
+
+    const timestamp = new Date().toLocaleTimeString();
+    console.error(`[${timestamp}] Updated data.json (${aggregationData.totalSessions} sessions)`);
+  } catch (err) {
+    console.error('Failed to regenerate data:', err);
+  }
 }
 
 function getEmptyAggregation(): MassAggregation {

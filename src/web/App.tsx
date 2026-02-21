@@ -10,7 +10,8 @@ import { Insights } from './components/Insights';
 type Tab = 'overview' | 'timeline' | 'files' | 'tools' | 'insights';
 
 export default function App() {
-  const { data, loading, error } = useAggregation();
+  const [liveMode, setLiveMode] = useState(true);
+  const { data, loading, error, lastUpdated, refresh } = useAggregation({ live: liveMode });
   const [activeTab, setActiveTab] = useState<Tab>('overview');
 
   if (loading) {
@@ -30,6 +31,12 @@ export default function App() {
         <div className="text-center">
           <div className="text-red-500 text-xl mb-2">Error loading data</div>
           <p className="text-gray-600">{error}</p>
+          <button
+            onClick={refresh}
+            className="mt-4 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );
@@ -63,7 +70,14 @@ export default function App() {
   };
 
   return (
-    <Layout activeTab={activeTab} onTabChange={setActiveTab}>
+    <Layout
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      liveMode={liveMode}
+      onLiveModeChange={setLiveMode}
+      lastUpdated={lastUpdated}
+      onRefresh={refresh}
+    >
       {renderContent()}
     </Layout>
   );
