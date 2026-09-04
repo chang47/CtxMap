@@ -102,6 +102,24 @@ table.grid tr:last-child td { border-bottom: none; }
 .empty { text-align: center; color: var(--text-dim); padding: 80px 20px; }
 .empty code { font-family: var(--mono); background: var(--panel-2); padding: 2px 6px; border-radius: 4px; color: var(--text); }
 
+/* Findings ("what to fix") */
+.findings { display: flex; flex-direction: column; gap: 10px; }
+.finding { border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px; padding: 12px 14px; background: var(--panel-2); }
+.finding.sev-high { border-left-color: var(--bad); }
+.finding.sev-medium { border-left-color: var(--warn); }
+.finding.sev-low { border-left-color: var(--text-faint); }
+.finding-head { display: flex; align-items: center; gap: 10px; }
+.finding-title { font-weight: 600; font-size: 13.5px; flex: 1; }
+.finding-cost { font-family: var(--mono); font-size: 12.5px; color: var(--accent); white-space: nowrap; }
+.sev-chip { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; padding: 2px 7px; border-radius: 999px; }
+.sev-chip.sev-high { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.sev-chip.sev-medium { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+.sev-chip.sev-low { background: var(--panel); color: var(--text-faint); }
+.finding-detail { color: var(--text-dim); font-size: 12.5px; margin: 7px 0 8px; }
+.finding-fix { font-size: 12.5px; color: var(--text); }
+.fix-label { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--good); border: 1px solid color-mix(in srgb, var(--good) 40%, transparent); padding: 1px 5px; border-radius: 4px; margin-right: 6px; }
+.findings-clean { color: var(--text-dim); font-size: 13px; }
+
 /* Benchmark matrix */
 table.matrix td.cell { vertical-align: top; padding: 10px; min-width: 130px; }
 .cell-cost { font-size: 14px; color: var(--accent); font-weight: 650; }

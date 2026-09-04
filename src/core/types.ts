@@ -192,6 +192,7 @@ export interface SessionReport {
   toolStats: ToolStats[];
   fileStats: FileStats[];
   toolSizeStats: ToolSizeStats[];
+  findings: Finding[]; // actionable "what to fix" list (the linter, issue #1 §4)
   // Compact per-turn context series for charting. Populated when a report is
   // prepared for the HTML view (see slimForReport); lets the report embed the
   // context-over-time line WITHOUT embedding full Turn objects (which carry raw
@@ -439,6 +440,29 @@ export interface AggregateOptions {
   projectPath?: string;
   since?: string; // YYYY-MM-DD
   format?: 'table' | 'json' | 'markdown';
+}
+
+// ============================================================================
+// Findings (the actionable linter — issue #1 §4, "what to fix")
+// ============================================================================
+
+export type FindingSeverity = 'high' | 'medium' | 'low';
+
+/**
+ * One actionable finding: a specific, fixable inefficiency detected from the
+ * transcript, with the fix. This is the differentiator over descriptive tools —
+ * it tells you what to change, not just where the tokens went.
+ */
+export interface Finding {
+  rule: string;             // 'oversized-output' | 'repeated-read' | 'cache-invalidation' | 'dead-weight-read'
+  severity: FindingSeverity;
+  title: string;            // short, specific ("Read radar/log.md 44×")
+  detail: string;           // what the transcript shows
+  fix: string;              // what to change
+  wastedTokens?: number;    // estimated tokens attributable to the inefficiency
+  wastedUsd?: number;       // rough $ estimate where cleanly computable
+  turnIndex?: number;
+  file?: string;
 }
 
 // ============================================================================

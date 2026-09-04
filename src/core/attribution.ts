@@ -17,6 +17,7 @@ import type {
 } from './types.js';
 import { COMPACT_THRESHOLD, DEFAULT_WINDOW, resolveModel } from './types.js';
 import { formatToolDescription } from './parser.js';
+import { computeFindings } from './findings.js';
 
 /**
  * Detect compact events from turns
@@ -534,6 +535,7 @@ export function generateReport(
   const toolSizeStats = aggregateToolSizeStats(turns);
   const topConsumers = getTopConsumers(turns);
   const userRequestStats = aggregateByUserMessage(turns);
+  const findings = computeFindings({ turns, fileStats, toolSizeStats, pricing: primaryModel.pricing });
 
   // Calculate totals
   const totalInputTokens = turns.reduce((sum, t) => sum + t.usage.input_tokens, 0);
@@ -590,5 +592,6 @@ export function generateReport(
     toolStats,
     fileStats,
     toolSizeStats,
+    findings,
   };
 }

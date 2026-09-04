@@ -280,6 +280,22 @@ export function formatReport(report: SessionReport): string {
   // Footer
   lines.push('╰' + '─'.repeat(width - 2) + '╯');
 
+  // What to fix — the actionable findings (the differentiator)
+  if (report.findings && report.findings.length > 0) {
+    lines.push('');
+    lines.push(`WHAT TO FIX — ${report.findings.length} finding${report.findings.length === 1 ? '' : 's'}`);
+    const sevMark: Record<string, string> = { high: '🔴', medium: '🟡', low: '⚪' };
+    for (const f of report.findings.slice(0, 8)) {
+      const cost = f.wastedUsd
+        ? `  ~${formatCurrency(f.wastedUsd)}`
+        : f.wastedTokens
+          ? `  ~${formatTokens(f.wastedTokens)} tok`
+          : '';
+      lines.push(`  ${sevMark[f.severity] ?? '•'} ${f.title}${cost}`);
+      lines.push(`     fix: ${f.fix}`);
+    }
+  }
+
   return lines.join('\n');
 }
 

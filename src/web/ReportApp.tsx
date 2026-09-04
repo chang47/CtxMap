@@ -14,6 +14,7 @@ import type {
   TopConsumer,
   BenchAggregate,
   BenchCell,
+  Finding,
 } from '../core/types';
 
 // ---------------------------------------------------------------------------
@@ -77,6 +78,39 @@ function VerdictHeader({ r }: { r: SessionReport }) {
       <div className="stat">
         <div className="label">Duration</div>
         <div className="value" style={{ fontSize: 18 }}>{r.duration || '—'}</div>
+      </div>
+    </div>
+  );
+}
+
+function FindingsPanel({ findings }: { findings: Finding[] }) {
+  if (!findings || findings.length === 0) {
+    return (
+      <div className="panel">
+        <h2>What to fix</h2>
+        <div className="findings-clean">No inefficiencies flagged — nothing oversized, re-read, or cache-busting stood out.</div>
+      </div>
+    );
+  }
+  return (
+    <div className="panel">
+      <h2>What to fix — {findings.length} finding{findings.length === 1 ? '' : 's'}</h2>
+      <div className="findings">
+        {findings.map((f, i) => (
+          <div className={`finding sev-${f.severity}`} key={i}>
+            <div className="finding-head">
+              <span className={`sev-chip sev-${f.severity}`}>{f.severity}</span>
+              <span className="finding-title">{f.title}</span>
+              {(f.wastedUsd || f.wastedTokens) && (
+                <span className="finding-cost">
+                  {f.wastedUsd ? `~${formatCurrency(f.wastedUsd)}` : `~${formatTokens(f.wastedTokens!)} tok`}
+                </span>
+              )}
+            </div>
+            <div className="finding-detail">{f.detail}</div>
+            <div className="finding-fix"><span className="fix-label">fix</span> {f.fix}</div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -220,6 +254,7 @@ function SessionReportView({ r }: { r: SessionReport }) {
       </div>
       <VerdictHeader r={r} />
       <div style={{ height: 18 }} />
+      <FindingsPanel findings={r.findings} />
       <WhereTokensWent consumers={r.topConsumers} />
       <ContextOverTime r={r} />
       <ToolBreakdown r={r} />
