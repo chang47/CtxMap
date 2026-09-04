@@ -17,6 +17,7 @@ import {
 } from '../core/parser.js';
 import { generateReport } from '../core/attribution.js';
 import { aggregateAllSessions } from '../core/aggregation.js';
+import { writeReport } from './report.js';
 import {
   formatReport,
   formatSessionList,
@@ -29,7 +30,6 @@ import {
   formatMassAggregationJson,
   formatMassAggregationMarkdown,
 } from './formatters.js';
-import { startServer } from './server.js';
 
 const program = new Command();
 
@@ -297,22 +297,35 @@ program
     }
   });
 
-// Serve command - start interactive dashboard
+// Report command - write a single self-contained HTML report for one session
 program
-  .command('serve')
-  .description('Start interactive dashboard')
-  .option('-p, --port <port>', 'Port number', '3000')
-  .option('--project <path>', 'Filter to specific project')
-  .option('--since <date>', 'Only include sessions since date (YYYY-MM-DD)')
+  .command('report')
+  .description('Write a single self-contained HTML report for a session (no server)')
+  .option('-s, --session <id>', 'Session ID to report on')
+  .option('-l, --latest', 'Report on the latest session (default)')
+  .option('-p, --project <path>', 'Latest session within a project')
+  .option('--input <file>', 'Analyze a specific transcript .jsonl file directly')
+  .option('-o, --output <path>', 'Output HTML path', 'ctxmap-report.html')
+  .option('--open', 'Open the report in the default browser after writing')
+  .option('--no-subagents', 'Exclude subagent transcripts from the totals')
+  .option('--json <path>', 'Also write the raw ReportEnvelope JSON to this path')
   .action(async (options) => {
     try {
-      const port = parseInt(options.port, 10) || 3000;
-      await startServer(port, {
-        projectPath: options.project,
-        since: options.since,
+      const { outPath, envelope } = await writeReport({
+        session: options.session,
+        project: options.project,
+        input: options.input,
+        output: options.output,
+        open: options.open,
+        subagents: options.subagents, // commander sets false for --no-subagents
+        json: options.json,
       });
+      const r = envelope.data as import('../core/types.js').SessionReport;
+      const cost = `$${r.estimatedCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      console.error(`✓ wrote ${outPath}  (session ${r.sessionId.slice(0, 8)} · ${r.totalTurns} turns · ${cost})`);
+      if (!options.open) console.error(`  open it → open "${outPath}"`);
     } catch (error) {
-      console.error('Error starting server:', error);
+      console.error('Error writing report:', error instanceof Error ? error.message : error);
       process.exit(1);
     }
   });

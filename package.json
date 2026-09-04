@@ -7,10 +7,15 @@
   "bin": {
     "ctxmap": "./dist/cli/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "build:web": "vite build",
-    "build:all": "npm run build && npm run build:web",
+    "build:report": "vite build --config vite.report.config.ts",
+    "build:all": "npm run build && npm run build:web && npm run build:report",
+    "prepare": "npm run build && npm run build:report",
     "dev": "tsc --watch",
     "dev:web": "vite",
     "start": "node dist/cli/index.js",
@@ -36,17 +41,18 @@
     "@vitejs/plugin-react": "^5.1.4",
     "autoprefixer": "^10.4.24",
     "postcss": "^8.5.6",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "recharts": "^3.7.0",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.7.3",
     "vite": "^7.3.1",
+    "vite-plugin-singlefile": "^2.3.3",
     "vitest": "^3.0.5"
   },
   "dependencies": {
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
-    "glob": "^11.0.1",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "recharts": "^3.7.0"
+    "glob": "^11.0.1"
   }
 }

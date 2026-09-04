@@ -192,6 +192,11 @@ export interface SessionReport {
   toolStats: ToolStats[];
   fileStats: FileStats[];
   toolSizeStats: ToolSizeStats[];
+  // Compact per-turn context series for charting. Populated when a report is
+  // prepared for the HTML view (see slimForReport); lets the report embed the
+  // context-over-time line WITHOUT embedding full Turn objects (which carry raw
+  // tool output / file contents — heavy and not safe to ship in a shareable file).
+  contextSeries?: Array<{ turn: number; context: number }>;
 }
 
 // ============================================================================
@@ -434,4 +439,31 @@ export interface AggregateOptions {
   projectPath?: string;
   since?: string; // YYYY-MM-DD
   format?: 'table' | 'json' | 'markdown';
+}
+
+// ============================================================================
+// Report Envelope (the lens-agnostic contract for the single-file HTML report)
+// ============================================================================
+
+/**
+ * The single unit injected into the self-contained HTML report at runtime.
+ *
+ * `kind` is the LENS discriminator: the report template switches on it to pick
+ * a view, and panels are pure functions of their slice of `data`. This is what
+ * lets the same file-emit mechanic + shared panels serve every measurement fork
+ * (see docs/ctxmap-dashboard-design.md §6):
+ *   - 'session'         → data is a SessionReport      (single-session deep-dive; flood lens)
+ *   - 'aggregate'       → data is a MassAggregation     (cross-session benchmarking; fork A) — future
+ *   - 'compaction-diff' → data is a CompactionDiff      (what /compact dropped; fork B) — future
+ *
+ * Adding a fork = compute a struct, stamp the kind, render its panels. No new
+ * delivery path, no second injector.
+ */
+export type ReportKind = 'session' | 'aggregate' | 'compaction-diff';
+
+export interface ReportEnvelope {
+  kind: ReportKind;
+  generatedAt: string;    // ISO timestamp the report was produced
+  ctxmapVersion: string;  // producing CtxMap version (guards against stale template/data drift)
+  data: SessionReport | MassAggregation;
 }
