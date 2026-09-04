@@ -32,6 +32,7 @@ export interface AssistantMessage {
   role: 'assistant';
   content: MessageContent[];
   usage?: Usage;
+  model?: string; // e.g. "claude-opus-4-8-20260101" — the model that served this turn
 }
 
 export interface ToolResult {
@@ -79,6 +80,7 @@ export interface Turn {
   outputTokens: number;
   userPrompt?: string; // The user message that triggered this turn
   resultSize?: number; // Size of tool result in bytes (if applicable)
+  model?: string; // The model that served this turn (from the transcript's message.model)
 }
 
 export interface CompactEvent {
@@ -170,6 +172,7 @@ export interface SessionReport {
   peakContext: number;
   peakContextPercent: number;
   modelWindow: number;
+  primaryModel?: string;    // Human-readable label of the session's dominant model (drives modelWindow)
   estimatedCost: number;
   segments: SessionSegment[];
   compactEvents: CompactEvent[];
@@ -198,28 +201,71 @@ export interface AnalysisOptions {
 // Constants
 // ============================================================================
 
-export const MODEL_WINDOW = 200_000; // Claude Opus 4.6, Sonnet, Haiku all have 200K context
+export type ModelFamily = 'opus' | 'sonnet-5' | 'sonnet' | 'haiku' | 'fable' | 'unknown';
 
-// Pricing rates (per 1M tokens) - Claude Opus 4.6
+export interface ModelPricing {
+  input: number;         // $ per 1M input tokens
+  output: number;        // $ per 1M output tokens
+  cacheCreation: number; // $ per 1M cache-write tokens (1.25x input)
+  cacheRead: number;     // $ per 1M cache-read tokens (0.10x input)
+}
+
+export interface ModelInfo {
+  family: ModelFamily;
+  label: string;
+  window: number;        // context window in tokens
+  pricing: ModelPricing; // per-1M-token rates
+}
+
+// Default context window for the 1M-window model families (Opus, Sonnet, Fable).
+export const DEFAULT_WINDOW = 1_000_000;
+
+// Per-model context windows + pricing (per 1M tokens), current as of 2026-09-04.
+// Cache-write = 1.25x input, cache-read = 0.10x input.
+// Sonnet is split: Sonnet 5 = $2/$10, older Sonnet (4.x/3.x) = $3/$15.
+export const MODELS: Record<ModelFamily, ModelInfo> = {
+  opus:       { family: 'opus',     label: 'Opus',     window: 1_000_000, pricing: { input: 5.0,  output: 25.0, cacheCreation: 6.25,  cacheRead: 0.50 } },
+  'sonnet-5': { family: 'sonnet-5', label: 'Sonnet 5', window: 1_000_000, pricing: { input: 2.0,  output: 10.0, cacheCreation: 2.50,  cacheRead: 0.20 } },
+  sonnet:     { family: 'sonnet',   label: 'Sonnet',   window: 1_000_000, pricing: { input: 3.0,  output: 15.0, cacheCreation: 3.75,  cacheRead: 0.30 } },
+  haiku:      { family: 'haiku',    label: 'Haiku',    window: 200_000,   pricing: { input: 1.0,  output: 5.0,  cacheCreation: 1.25,  cacheRead: 0.10 } },
+  fable:      { family: 'fable',    label: 'Fable',    window: 1_000_000, pricing: { input: 10.0, output: 50.0, cacheCreation: 12.50, cacheRead: 1.00 } },
+  // Fallback when the transcript carries no (or an unrecognized) model id. Priced/sized as Opus-class.
+  unknown:    { family: 'unknown',  label: 'Unknown',  window: 1_000_000, pricing: { input: 5.0,  output: 25.0, cacheCreation: 6.25,  cacheRead: 0.50 } },
+};
+
+/**
+ * Resolve a raw transcript model id (e.g. "claude-opus-4-8-20260101",
+ * "claude-sonnet-5", "claude-3-5-sonnet-20241022") to its ModelInfo.
+ * Order matters: fable/opus/haiku are checked before sonnet, and Sonnet 5 is
+ * distinguished from older Sonnet by an explicit "sonnet 5" token so that
+ * "claude-3-5-sonnet" (a 3.5 model) does NOT match the Sonnet-5 rate.
+ */
+export function resolveModel(modelId: string | undefined | null): ModelInfo {
+  if (!modelId) return MODELS.unknown;
+  const id = modelId.toLowerCase();
+  if (id.includes('fable')) return MODELS.fable;
+  if (id.includes('opus')) return MODELS.opus;
+  if (id.includes('haiku')) return MODELS.haiku;
+  if (id.includes('sonnet')) {
+    return /sonnet-?5/.test(id) ? MODELS['sonnet-5'] : MODELS.sonnet;
+  }
+  return MODELS.unknown;
+}
+
+/**
+ * @deprecated Use MODELS / resolveModel(). Kept for backward compatibility.
+ * Represents the default 1M-token window; per-model windows now live in MODELS.
+ */
+export const MODEL_WINDOW = DEFAULT_WINDOW;
+
+/**
+ * @deprecated Use MODELS / resolveModel(). Kept for backward compatibility with
+ * any external callers; values reflect current per-1M rates.
+ */
 export const PRICING = {
-  opus: {
-    input: 15.0,
-    output: 75.0,
-    cacheCreation: 18.75,
-    cacheRead: 1.50,
-  },
-  sonnet: {
-    input: 3.0,
-    output: 15.0,
-    cacheCreation: 3.75,
-    cacheRead: 0.30,
-  },
-  haiku: {
-    input: 0.25,
-    output: 1.25,
-    cacheCreation: 0.30,
-    cacheRead: 0.03,
-  },
+  opus: MODELS.opus.pricing,
+  sonnet: MODELS.sonnet.pricing,
+  haiku: MODELS.haiku.pricing,
 };
 
 // Performance zones

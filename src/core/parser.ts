@@ -287,6 +287,7 @@ export function parseTurns(entries: JsonlEntry[]): Turn[] {
       outputTokens: usage.output_tokens,
       userPrompt,
       resultSize,
+      model: message.model,
     };
 
     turns.push(turn);

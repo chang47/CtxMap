@@ -15,18 +15,8 @@ import type {
   SessionReport,
   ToolCall,
 } from './types.js';
+import { COMPACT_THRESHOLD, DEFAULT_WINDOW, resolveModel } from './types.js';
 import { formatToolDescription } from './parser.js';
-
-const MODEL_WINDOW = 200_000;
-const COMPACT_THRESHOLD = 0.5;
-
-// Pricing rates (per 1M tokens) - Claude Opus 4.6
-const PRICING = {
-  input: 15.0,
-  output: 75.0,
-  cacheCreation: 18.75,
-  cacheRead: 1.50,
-};
 
 /**
  * Detect compact events from turns
@@ -57,7 +47,11 @@ export function detectCompacts(turns: Turn[]): CompactEvent[] {
 /**
  * Segment session by compact events
  */
-export function segmentSession(turns: Turn[], compacts: CompactEvent[]): SessionSegment[] {
+export function segmentSession(
+  turns: Turn[],
+  compacts: CompactEvent[],
+  modelWindow: number = DEFAULT_WINDOW
+): SessionSegment[] {
   if (turns.length === 0) return [];
 
   const segments: SessionSegment[] = [];
@@ -72,7 +66,7 @@ export function segmentSession(turns: Turn[], compacts: CompactEvent[]): Session
 
     if (segmentTurns.length > 0) {
       const peakContext = Math.max(...segmentTurns.map(t => t.contextTokens));
-      const peakContextPercent = (peakContext / MODEL_WINDOW) * 100;
+      const peakContextPercent = (peakContext / modelWindow) * 100;
       const totalTokens = segmentTurns.reduce((sum, t) => sum + t.tokenDelta, 0);
 
       const startTs = segmentTurns[0].timestamp;
@@ -442,21 +436,70 @@ export function aggregateByUserMessage(turns: Turn[]): UserRequestStats[] {
 }
 
 /**
- * Calculate estimated cost based on usage
+ * Calculate estimated cost based on usage, priced at the given model's rates.
+ * `model` is a raw transcript model id (e.g. "claude-opus-4-8-…"); when omitted
+ * or unrecognized it falls back to Opus-class rates (see resolveModel/MODELS).
  */
-export function calculateCost(usage: {
-  inputTokens: number;
-  outputTokens: number;
-  cacheCreation: number;
-  cacheRead: number;
-}): number {
+export function calculateCost(
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreation: number;
+    cacheRead: number;
+  },
+  model?: string
+): number {
+  const p = resolveModel(model).pricing;
   const cost =
-    (usage.inputTokens / 1_000_000) * PRICING.input +
-    (usage.outputTokens / 1_000_000) * PRICING.output +
-    (usage.cacheCreation / 1_000_000) * PRICING.cacheCreation +
-    (usage.cacheRead / 1_000_000) * PRICING.cacheRead;
+    (usage.inputTokens / 1_000_000) * p.input +
+    (usage.outputTokens / 1_000_000) * p.output +
+    (usage.cacheCreation / 1_000_000) * p.cacheCreation +
+    (usage.cacheRead / 1_000_000) * p.cacheRead;
 
   return cost;
+}
+
+/**
+ * Sum per-turn cost, pricing each turn at its own model's rates. This is
+ * billing-grade for mixed-model sessions (e.g. an Opus main loop with Haiku
+ * subagent turns), where a single blended rate would be wrong.
+ */
+export function calculateSessionCost(turns: Turn[]): number {
+  return turns.reduce(
+    (sum, t) =>
+      sum +
+      calculateCost(
+        {
+          inputTokens: t.usage.input_tokens,
+          outputTokens: t.usage.output_tokens,
+          cacheCreation: t.usage.cache_creation_input_tokens || 0,
+          cacheRead: t.usage.cache_read_input_tokens || 0,
+        },
+        t.model
+      ),
+    0
+  );
+}
+
+/**
+ * Determine the session's dominant model — the one that served the most turns.
+ * Drives the session-level context window and %-of-window figures.
+ */
+export function getPrimaryModel(turns: Turn[]): string | undefined {
+  const counts = new Map<string, number>();
+  for (const t of turns) {
+    if (!t.model) continue;
+    counts.set(t.model, (counts.get(t.model) || 0) + 1);
+  }
+  let best: string | undefined;
+  let bestCount = 0;
+  for (const [model, count] of counts) {
+    if (count > bestCount) {
+      best = model;
+      bestCount = count;
+    }
+  }
+  return best;
 }
 
 /**
@@ -468,7 +511,14 @@ export function generateReport(
   turns: Turn[]
 ): SessionReport {
   const compacts = detectCompacts(turns);
-  const segments = segmentSession(turns, compacts);
+
+  // Resolve the session's dominant model → its context window drives all
+  // %-of-window figures (per-model: Opus/Sonnet/Fable 1M, Haiku 200K).
+  const primaryModelId = getPrimaryModel(turns);
+  const primaryModel = resolveModel(primaryModelId);
+  const modelWindow = primaryModel.window;
+
+  const segments = segmentSession(turns, compacts, modelWindow);
   const toolStats = aggregateToolStats(turns);
   const fileStats = aggregateFileStats(turns);
   const toolSizeStats = aggregateToolSizeStats(turns);
@@ -488,14 +538,10 @@ export function generateReport(
   );
   const totalContextTokens = turns.reduce((sum, t) => sum + t.tokenDelta, 0);
   const peakContext = Math.max(...turns.map(t => t.contextTokens), 0);
-  const peakContextPercent = (peakContext / MODEL_WINDOW) * 100;
+  const peakContextPercent = (peakContext / modelWindow) * 100;
 
-  const estimatedCost = calculateCost({
-    inputTokens: totalInputTokens,
-    outputTokens: totalOutputTokens,
-    cacheCreation: totalCacheCreation,
-    cacheRead: totalCacheRead,
-  });
+  // Price each turn at its own model's rates (billing-grade for mixed-model sessions).
+  const estimatedCost = calculateSessionCost(turns);
 
   const startTimestamp = turns[0]?.timestamp || '';
   const endTimestamp = turns[turns.length - 1]?.timestamp || '';
@@ -514,7 +560,8 @@ export function generateReport(
     totalContextTokens,
     peakContext,
     peakContextPercent,
-    modelWindow: MODEL_WINDOW,
+    modelWindow,
+    primaryModel: primaryModel.label,
     estimatedCost,
     segments,
     compactEvents: compacts,

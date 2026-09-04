@@ -260,7 +260,8 @@ export function formatReport(report: SessionReport): string {
     );
   }
 
-  lines.push(formatLine(`│ ESTIMATED COST: ${formatCurrency(report.estimatedCost)} (Opus 4.6 rates)`, width));
+  const rateLabel = report.primaryModel ? `${report.primaryModel} rates` : 'per-model rates';
+  lines.push(formatLine(`│ ESTIMATED COST: ${formatCurrency(report.estimatedCost)} (${rateLabel})`, width));
 
   // Footer
   lines.push('╰' + '─'.repeat(width - 2) + '╯');

@@ -124,6 +124,18 @@ describe('attribution', () => {
       const segments = segmentSession(turns, []);
 
       expect(segments[0].peakContext).toBe(50000);
+      expect(segments[0].peakContextPercent).toBe(5); // 50000 / 1_000_000 (default window) * 100
+    });
+
+    it('should honor an explicit per-model window (Haiku = 200K)', () => {
+      const turns: Turn[] = [
+        createTurn({ turnIndex: 0, contextTokens: 10000 }),
+        createTurn({ turnIndex: 1, contextTokens: 50000 }),
+      ];
+
+      const segments = segmentSession(turns, [], 200_000);
+
+      expect(segments[0].peakContext).toBe(50000);
       expect(segments[0].peakContextPercent).toBe(25); // 50000 / 200000 * 100
     });
   });
@@ -424,18 +436,40 @@ describe('attribution', () => {
   });
 
   describe('calculateCost', () => {
-    it('should calculate cost based on Opus 4.6 rates', () => {
+    it('should default to Opus-class rates when no model is given', () => {
       const cost = calculateCost({
-        inputTokens: 1_000_000,  // $15
-        outputTokens: 1_000_000, // $75
-        cacheCreation: 1_000_000, // $18.75
-        cacheRead: 1_000_000,     // $1.50
+        inputTokens: 1_000_000,  // $5
+        outputTokens: 1_000_000, // $25
+        cacheCreation: 1_000_000, // $6.25
+        cacheRead: 1_000_000,     // $0.50
       });
 
-      expect(cost).toBeCloseTo(110.25, 2);
+      expect(cost).toBeCloseTo(36.75, 2);
     });
 
-    it('should handle small values', () => {
+    it('should price explicit Opus rates', () => {
+      const cost = calculateCost(
+        { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheCreation: 1_000_000, cacheRead: 1_000_000 },
+        'claude-opus-4-8-20260101'
+      );
+      expect(cost).toBeCloseTo(36.75, 2); // 5 + 25 + 6.25 + 0.5
+    });
+
+    it('should price Sonnet 5 distinctly from older Sonnet', () => {
+      const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheCreation: 0, cacheRead: 0 };
+      expect(calculateCost(usage, 'claude-sonnet-5')).toBeCloseTo(12.0, 2); // $2 + $10
+      expect(calculateCost(usage, 'claude-sonnet-4-6')).toBeCloseTo(18.0, 2); // $3 + $15
+      // "3-5-sonnet" is a 3.5 model, NOT Sonnet 5 → older Sonnet rate.
+      expect(calculateCost(usage, 'claude-3-5-sonnet-20241022')).toBeCloseTo(18.0, 2);
+    });
+
+    it('should price Haiku and Fable', () => {
+      const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheCreation: 0, cacheRead: 0 };
+      expect(calculateCost(usage, 'claude-haiku-4-5-20251001')).toBeCloseTo(6.0, 2);  // $1 + $5
+      expect(calculateCost(usage, 'claude-fable-5-1')).toBeCloseTo(60.0, 2);          // $10 + $50
+    });
+
+    it('should handle small values at default (Opus) rates', () => {
       const cost = calculateCost({
         inputTokens: 1000,
         outputTokens: 500,
@@ -443,8 +477,8 @@ describe('attribution', () => {
         cacheRead: 0,
       });
 
-      // 1000 * 15/1M + 500 * 75/1M = 0.015 + 0.0375 = 0.0525
-      expect(cost).toBeCloseTo(0.0525, 4);
+      // 1000 * 5/1M + 500 * 25/1M = 0.005 + 0.0125 = 0.0175
+      expect(cost).toBeCloseTo(0.0175, 4);
     });
   });
 
@@ -478,6 +512,67 @@ describe('attribution', () => {
       expect(report.toolStats).toHaveLength(2);
       expect(report.compactEvents).toHaveLength(0);
       expect(report.segments).toHaveLength(1);
+    });
+
+    it('should use the dominant model window (Opus = 1M) and price per-turn', () => {
+      const turns: Turn[] = [
+        createTurn({
+          turnIndex: 0,
+          model: 'claude-opus-4-8-20260101',
+          usage: { input_tokens: 1_000_000, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+          contextTokens: 100_000,
+          tokenDelta: 100_000,
+        }),
+      ];
+
+      const report = generateReport('s', 'p', turns);
+
+      expect(report.modelWindow).toBe(1_000_000);
+      expect(report.primaryModel).toBe('Opus');
+      expect(report.peakContextPercent).toBeCloseTo(10, 5); // 100K / 1M
+      expect(report.estimatedCost).toBeCloseTo(5.0, 2);     // 1M input * $5/1M
+    });
+
+    it('should size the window to Haiku (200K) for a Haiku-dominant session', () => {
+      const turns: Turn[] = [
+        createTurn({
+          turnIndex: 0,
+          model: 'claude-haiku-4-5-20251001',
+          usage: { input_tokens: 100, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+          contextTokens: 100_000,
+          tokenDelta: 100_000,
+        }),
+      ];
+
+      const report = generateReport('s', 'p', turns);
+
+      expect(report.modelWindow).toBe(200_000);
+      expect(report.primaryModel).toBe('Haiku');
+      expect(report.peakContextPercent).toBeCloseTo(50, 5); // 100K / 200K
+    });
+
+    it('should sum cost across mixed models per turn', () => {
+      const turns: Turn[] = [
+        createTurn({
+          turnIndex: 0,
+          model: 'claude-opus-4-8',
+          usage: { input_tokens: 1_000_000, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+          contextTokens: 1_000_000,
+          tokenDelta: 1_000_000,
+        }),
+        createTurn({
+          turnIndex: 1,
+          model: 'claude-haiku-4-5',
+          usage: { input_tokens: 1_000_000, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+          contextTokens: 1_000_000,
+          tokenDelta: 0,
+        }),
+      ];
+
+      const report = generateReport('s', 'p', turns);
+
+      // Opus 1M input ($5) + Haiku 1M input ($1) = $6, NOT priced all-as-Opus ($10).
+      expect(report.estimatedCost).toBeCloseTo(6.0, 2);
     });
   });
 });
