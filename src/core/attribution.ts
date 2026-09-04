@@ -166,13 +166,21 @@ export function aggregateToolStats(turns: Turn[]): ToolStats[] {
       contextTokens: 0,
     };
 
+    // Attribute only POSITIVE growth as consumption. A turn's tokenDelta is
+    // negative at compaction points (context dropped) — that's removal, not a
+    // tool "spending" context. Summing net deltas made the denominator collapse
+    // toward the final context while per-tool sums stayed large, so
+    // percentOfSession blew past 100% (e.g. 504%). Gross-positive growth keeps
+    // each share in 0–100% and the column sums to ~100%. (topConsumers already
+    // filters to positive deltas — this makes toolStats consistent with it.)
+    const growth = turn.tokenDelta > 0 ? turn.tokenDelta : 0;
     stats.count++;
     stats.inputTokens += turn.usage.input_tokens;
     stats.outputTokens += turn.usage.output_tokens;
     stats.cacheCreation += turn.usage.cache_creation_input_tokens || 0;
     stats.cacheRead += turn.usage.cache_read_input_tokens || 0;
-    stats.contextTokens += turn.tokenDelta;
-    totalContext += turn.tokenDelta;
+    stats.contextTokens += growth;
+    totalContext += growth;
 
     toolMap.set(toolName, stats);
   }

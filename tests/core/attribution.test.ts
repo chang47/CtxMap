@@ -168,6 +168,38 @@ describe('attribution', () => {
       expect(stats.find(s => s.toolName === 'Bash')?.count).toBe(1);
     });
 
+    it('should keep percentOfSession in 0–100% when a compaction drop occurs', () => {
+      // A big negative delta (compaction) must not inflate the denominator math.
+      const turns: Turn[] = [
+        createTurn({
+          toolCall: { toolId: '1', toolName: 'Read', input: {}, isError: false },
+          contextTokens: 800_000,
+          tokenDelta: 800_000,
+        }),
+        createTurn({
+          toolCall: { toolId: '2', toolName: 'Bash', input: {}, isError: false },
+          contextTokens: 60_000,
+          tokenDelta: -740_000, // compaction: context dropped, not "consumption"
+        }),
+        createTurn({
+          toolCall: { toolId: '3', toolName: 'Bash', input: {}, isError: false },
+          contextTokens: 260_000,
+          tokenDelta: 200_000,
+        }),
+      ];
+
+      const stats = aggregateToolStats(turns);
+      const total = stats.reduce((s, t) => s + t.percentOfSession, 0);
+
+      for (const t of stats) {
+        expect(t.percentOfSession).toBeGreaterThanOrEqual(0);
+        expect(t.percentOfSession).toBeLessThanOrEqual(100);
+      }
+      expect(total).toBeCloseTo(100, 5); // gross positive growth: 800K + 200K
+      expect(stats.find(s => s.toolName === 'Read')?.percentOfSession).toBeCloseTo(80, 5);
+      expect(stats.find(s => s.toolName === 'Bash')?.percentOfSession).toBeCloseTo(20, 5);
+    });
+
     it('should handle turns without tool calls', () => {
       const turns: Turn[] = [
         createTurn({ toolCall: null, tokenDelta: 500 }),
