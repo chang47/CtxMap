@@ -112,6 +112,40 @@ export async function parseJsonlFile(filePath: string): Promise<JsonlEntry[]> {
 }
 
 /**
+ * Load and parse the subagent transcripts that belong to a main session file.
+ * Subagents live at `<projectDir>/<sessionId>/subagents/agent-*.jsonl` alongside
+ * the main `<projectDir>/<sessionId>.jsonl`. Each subagent is its own transcript
+ * with its own token/usage stream; we parse each into turns and return them
+ * flattened, plus the agent count, so the caller can fold their spend into the
+ * parent session total.
+ */
+export async function loadSubagentTurns(
+  mainFilePath: string
+): Promise<{ turns: Turn[]; count: number }> {
+  const base = mainFilePath.replace(/\.jsonl$/, '');
+  const dir = path.join(base, 'subagents');
+
+  if (!fs.existsSync(dir)) {
+    return { turns: [], count: 0 };
+  }
+
+  const files = await glob('agent-*.jsonl', { cwd: dir, absolute: true });
+  const turns: Turn[] = [];
+
+  for (const file of files) {
+    try {
+      const entries = await parseJsonlFile(file);
+      // Subagent transcripts are entirely isSidechain:true — include them.
+      turns.push(...parseTurns(entries, { includeSidechain: true }));
+    } catch {
+      // Skip an unparseable subagent transcript rather than failing the session.
+    }
+  }
+
+  return { turns, count: files.length };
+}
+
+/**
  * Get the first non-tool text content from a message
  */
 function getTextContent(message: AssistantMessage): string | null {
@@ -259,9 +293,19 @@ function findUserPrompt(entries: JsonlEntry[], startIndex: number): string | und
 }
 
 /**
- * Parse entries into turns with token attribution
+ * Parse entries into turns with token attribution.
+ *
+ * `includeSidechain` defaults to false so the MAIN transcript excludes embedded
+ * sidechain (subagent) turns and doesn't double-count them. Subagent transcripts
+ * (`agent-*.jsonl`) are themselves entirely `isSidechain: true`, so when parsing
+ * one of those directly (see loadSubagentTurns) pass `includeSidechain: true` —
+ * otherwise every turn is skipped.
  */
-export function parseTurns(entries: JsonlEntry[]): Turn[] {
+export function parseTurns(
+  entries: JsonlEntry[],
+  options: { includeSidechain?: boolean } = {}
+): Turn[] {
+  const { includeSidechain = false } = options;
   const turns: Turn[] = [];
   let turnIndex = 0;
   let previousContext = 0;
@@ -270,10 +314,10 @@ export function parseTurns(entries: JsonlEntry[]): Turn[] {
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
 
-    // Skip non-assistant entries, sidechain, or entries without usage
+    // Skip non-assistant entries, sidechain (unless requested), or entries without usage
     if (
       entry.type !== 'assistant' ||
-      entry.isSidechain ||
+      (!includeSidechain && entry.isSidechain) ||
       !entry.message ||
       entry.message.role !== 'assistant' ||
       !entry.message.usage

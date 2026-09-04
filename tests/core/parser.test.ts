@@ -104,6 +104,38 @@ describe('parser', () => {
       expect(turns).toHaveLength(1);
     });
 
+    it('should include sidechain entries when includeSidechain is set (subagent transcripts)', () => {
+      const entries: JsonlEntry[] = [
+        {
+          type: 'assistant',
+          timestamp: '2025-02-19T10:00:00Z',
+          sessionId: 'agent-1',
+          isSidechain: true, // subagent transcripts are entirely sidechain
+          message: {
+            role: 'assistant',
+            content: [],
+            usage: { input_tokens: 100, output_tokens: 50 },
+            model: 'claude-opus-4-8',
+          },
+        },
+        {
+          type: 'assistant',
+          timestamp: '2025-02-19T10:00:01Z',
+          sessionId: 'agent-1',
+          isSidechain: true,
+          message: {
+            role: 'assistant',
+            content: [],
+            usage: { input_tokens: 200, output_tokens: 60 },
+            model: 'claude-opus-4-8',
+          },
+        },
+      ];
+
+      expect(parseTurns(entries)).toHaveLength(0); // default: skipped
+      expect(parseTurns(entries, { includeSidechain: true })).toHaveLength(2);
+    });
+
     it('should skip entries without usage', () => {
       const entries: JsonlEntry[] = [
         {

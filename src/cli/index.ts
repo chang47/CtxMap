@@ -13,6 +13,7 @@ import {
   parseJsonlFile,
   parseTurns,
   getSessionMetadata,
+  loadSubagentTurns,
 } from '../core/parser.js';
 import { generateReport } from '../core/attribution.js';
 import { aggregateAllSessions } from '../core/aggregation.js';
@@ -98,7 +99,8 @@ program
       }
 
       const metadata = getSessionMetadata(entries);
-      const report = generateReport(metadata.sessionId, projectPath, turns);
+      const { turns: subagentTurns, count: subagentCount } = await loadSubagentTurns(sessionFile);
+      const report = generateReport(metadata.sessionId, projectPath, turns, subagentTurns, subagentCount);
 
       // Output in requested format
       switch (options.format) {
@@ -169,7 +171,8 @@ program
       }
 
       const metadata = getSessionMetadata(entries);
-      const report = generateReport(metadata.sessionId, projectPath, turns);
+      const { turns: subagentTurns, count: subagentCount } = await loadSubagentTurns(sessionFile);
+      const report = generateReport(metadata.sessionId, projectPath, turns, subagentTurns, subagentCount);
 
       console.log(formatTurnByTurn(report));
     } catch (error) {
@@ -244,7 +247,8 @@ program
 
         if (turns.length > 0) {
           const metadata = getSessionMetadata(entries);
-          const report = generateReport(metadata.sessionId, found.projectPath, turns);
+          const { turns: subagentTurns, count: subagentCount } = await loadSubagentTurns(found.filePath);
+          const report = generateReport(metadata.sessionId, found.projectPath, turns, subagentTurns, subagentCount);
           reports.push(report);
         }
       }

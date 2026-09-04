@@ -262,6 +262,20 @@ export function formatReport(report: SessionReport): string {
 
   const rateLabel = report.primaryModel ? `${report.primaryModel} rates` : 'per-model rates';
   lines.push(formatLine(`│ ESTIMATED COST: ${formatCurrency(report.estimatedCost)} (${rateLabel})`, width));
+  if (report.subagentCount && report.subagentCount > 0) {
+    lines.push(
+      formatLine(
+        `│   ├─ main thread: ${formatCurrency(report.mainThreadCost ?? report.estimatedCost)}`,
+        width
+      )
+    );
+    lines.push(
+      formatLine(
+        `│   └─ ${report.subagentCount} subagent${report.subagentCount === 1 ? '' : 's'} (${report.subagentTurns ?? 0} turns): ${formatCurrency(report.subagentCost ?? 0)}`,
+        width
+      )
+    );
+  }
 
   // Footer
   lines.push('╰' + '─'.repeat(width - 2) + '╯');

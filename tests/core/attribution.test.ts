@@ -551,6 +551,38 @@ describe('attribution', () => {
       expect(report.peakContextPercent).toBeCloseTo(50, 5); // 100K / 200K
     });
 
+    it('should fold subagent cost into the total but keep context on the main thread', () => {
+      const mainTurns: Turn[] = [
+        createTurn({
+          turnIndex: 0,
+          model: 'claude-opus-4-8',
+          usage: { input_tokens: 1_000_000, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+          contextTokens: 500_000,
+          tokenDelta: 500_000,
+        }),
+      ];
+      const subagentTurns: Turn[] = [
+        createTurn({
+          turnIndex: 0,
+          model: 'claude-haiku-4-5',
+          usage: { input_tokens: 1_000_000, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+          contextTokens: 900_000, // huge, but must NOT affect the main-thread peak
+          tokenDelta: 900_000,
+        }),
+      ];
+
+      const report = generateReport('s', 'p', mainTurns, subagentTurns, 3);
+
+      expect(report.mainThreadCost).toBeCloseTo(5.0, 2);   // Opus 1M input
+      expect(report.subagentCost).toBeCloseTo(1.0, 2);     // Haiku 1M input
+      expect(report.estimatedCost).toBeCloseTo(6.0, 2);    // folded total
+      expect(report.subagentCount).toBe(3);
+      expect(report.subagentTurns).toBe(1);
+      // Context stays main-thread: peak reflects the main turn (500K), not 900K.
+      expect(report.peakContext).toBe(500_000);
+      expect(report.peakContextPercent).toBeCloseTo(50, 5);
+    });
+
     it('should sum cost across mixed models per turn', () => {
       const turns: Turn[] = [
         createTurn({

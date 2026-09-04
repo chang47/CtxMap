@@ -180,7 +180,11 @@ export interface SessionReport {
   peakContextPercent: number;
   modelWindow: number;
   primaryModel?: string;    // Human-readable label of the session's dominant model (drives modelWindow)
-  estimatedCost: number;
+  estimatedCost: number;    // Total session cost INCLUDING subagents (main-thread + subagent spend)
+  mainThreadCost?: number;  // Cost of the main transcript alone (estimatedCost minus subagents)
+  subagentCount?: number;   // Number of subagent transcripts folded in
+  subagentTurns?: number;   // Total turns across those subagents
+  subagentCost?: number;    // Combined cost of all subagent transcripts
   segments: SessionSegment[];
   compactEvents: CompactEvent[];
   topConsumers: TopConsumer[];

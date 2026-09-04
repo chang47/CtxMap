@@ -17,7 +17,7 @@ import type {
   AggregateOptions,
   ToolSizeStats,
 } from './types.js';
-import { listSessions, parseJsonlFile, parseTurns, getSessionMetadata } from './parser.js';
+import { listSessions, parseJsonlFile, parseTurns, getSessionMetadata, loadSubagentTurns } from './parser.js';
 import { generateReport } from './attribution.js';
 
 /**
@@ -54,7 +54,8 @@ export async function aggregateAllSessions(options: AggregateOptions = {}): Prom
       const turns = parseTurns(entries);
       if (turns.length > 0) {
         const metadata = getSessionMetadata(entries);
-        const report = generateReport(metadata.sessionId, session.projectPath, turns);
+        const { turns: subagentTurns, count: subagentCount } = await loadSubagentTurns(session.filePath);
+        const report = generateReport(metadata.sessionId, session.projectPath, turns, subagentTurns, subagentCount);
         reports.push(report);
       }
     } catch {

@@ -508,7 +508,9 @@ export function getPrimaryModel(turns: Turn[]): string | undefined {
 export function generateReport(
   sessionId: string,
   projectPath: string,
-  turns: Turn[]
+  turns: Turn[],
+  subagentTurns: Turn[] = [],
+  subagentCount: number = 0
 ): SessionReport {
   const compacts = detectCompacts(turns);
 
@@ -541,7 +543,13 @@ export function generateReport(
   const peakContextPercent = (peakContext / modelWindow) * 100;
 
   // Price each turn at its own model's rates (billing-grade for mixed-model sessions).
-  const estimatedCost = calculateSessionCost(turns);
+  // Subagents run on their own transcripts (often Haiku) — fold their spend into
+  // the session total so "what this session cost" is complete, while the context /
+  // segment / turn-table analysis above stays on the main thread (subagents have
+  // their own separate context windows).
+  const mainThreadCost = calculateSessionCost(turns);
+  const subagentCost = calculateSessionCost(subagentTurns);
+  const estimatedCost = mainThreadCost + subagentCost;
 
   const startTimestamp = turns[0]?.timestamp || '';
   const endTimestamp = turns[turns.length - 1]?.timestamp || '';
@@ -563,6 +571,10 @@ export function generateReport(
     modelWindow,
     primaryModel: primaryModel.label,
     estimatedCost,
+    mainThreadCost,
+    subagentCount,
+    subagentTurns: subagentTurns.length,
+    subagentCost,
     segments,
     compactEvents: compacts,
     topConsumers,
