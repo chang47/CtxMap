@@ -330,5 +330,91 @@ program
     }
   });
 
+// Tag command - attach a workflow name + manual quality rating to a session
+program
+  .command('tag <session>')
+  .description('Tag a session with a workflow + manual quality rating (for benchmarking)')
+  .option('-w, --workflow <name>', 'Workflow label (e.g. bugfix, radar-iteration)')
+  .option('-r, --rating <rating>', 'Manual quality: good | ok | bad (👍/👌/👎)')
+  .option('-c, --config <name>', 'Optional config/harness label')
+  .option('-n, --note <text>', 'Optional note')
+  .action(async (session, options) => {
+    try {
+      const { upsertTag, tagStorePath } = await import('../core/tags.js');
+
+      if (options.rating && !['good', 'ok', 'bad'].includes(options.rating)) {
+        console.error(`Invalid --rating "${options.rating}". Use: good | ok | bad`);
+        process.exit(1);
+      }
+
+      // Resolve a prefix to the full session id so tags key consistently with bench.
+      const all = await listSessions();
+      const match = all.find((x) => x.sessionId === session || x.sessionId.startsWith(session));
+      const resolvedId = match?.sessionId ?? session;
+
+      const merged = upsertTag(resolvedId, {
+        workflow: options.workflow,
+        rating: options.rating,
+        config: options.config,
+        note: options.note,
+      });
+      console.error(`✓ tagged ${resolvedId.slice(0, 8)} → workflow=${merged.workflow ?? '—'} rating=${merged.rating ?? '—'}${merged.config ? ' config=' + merged.config : ''}`);
+      console.error(`  (${tagStorePath()})`);
+    } catch (error) {
+      console.error('Error tagging session:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// Bench command - model × workflow benchmark across tagged sessions
+program
+  .command('bench')
+  .description('Benchmark model × workflow across tagged sessions (cost + manual quality)')
+  .option('-w, --workflow <name>', 'Restrict to one workflow')
+  .option('-o, --output <path>', 'Write an HTML benchmark report to this path')
+  .option('--open', 'Open the HTML report after writing (implies --output)')
+  .option('--json <path>', 'Also write the raw BenchAggregate envelope JSON')
+  .option('--all', 'Include untagged sessions too (default: tagged only)')
+  .action(async (options) => {
+    try {
+      const { buildBenchAggregate } = await import('../core/bench.js');
+      const bench = await buildBenchAggregate({
+        workflow: options.workflow,
+        taggedOnly: !options.all,
+      });
+
+      if (bench.totalRuns === 0) {
+        console.error('No tagged sessions found. Tag some first: ctxmap tag <session> --workflow X --rating good');
+        process.exit(0);
+      }
+
+      // Terminal matrix
+      console.log(`\nBenchmark — ${bench.totalRuns} runs · ${bench.workflows.length} workflows × ${bench.models.length} models\n`);
+      for (const wf of bench.workflows) {
+        console.log(`  ${wf}`);
+        for (const model of bench.models) {
+          const cell = bench.cells.find((c) => c.workflow === wf && c.model === model);
+          if (!cell) continue;
+          const q = cell.qualityScore === null ? 'unrated' : `${Math.round(cell.qualityScore * 100)}% good (👍${cell.good}/👌${cell.ok}/👎${cell.bad})`;
+          const cost = `$${cell.avgCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          console.log(`    ${model.padEnd(10)} ${String(cell.runs).padStart(3)} runs  avg ${cost.padStart(11)}  peak ${cell.avgPeakPercent.toFixed(0)}%  ${q}`);
+        }
+      }
+      console.log('');
+
+      if (options.output || options.open) {
+        const { writeEnvelope, reportVersion } = await import('./report.js');
+        const outPath = writeEnvelope(
+          { kind: 'aggregate', generatedAt: bench.generatedAt, ctxmapVersion: reportVersion(), data: bench },
+          { output: options.output, open: options.open, json: options.json, defaultName: 'ctxmap-bench.html' }
+        );
+        console.error(`✓ wrote ${outPath}`);
+      }
+    } catch (error) {
+      console.error('Error building benchmark:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 // Parse and run
 program.parse();

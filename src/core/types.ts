@@ -452,9 +452,9 @@ export interface AggregateOptions {
  * a view, and panels are pure functions of their slice of `data`. This is what
  * lets the same file-emit mechanic + shared panels serve every measurement fork
  * (see docs/ctxmap-dashboard-design.md §6):
- *   - 'session'         → data is a SessionReport      (single-session deep-dive; flood lens)
- *   - 'aggregate'       → data is a MassAggregation     (cross-session benchmarking; fork A) — future
- *   - 'compaction-diff' → data is a CompactionDiff      (what /compact dropped; fork B) — future
+ *   - 'session'         → data is a SessionReport   (single-session deep-dive; flood lens)
+ *   - 'aggregate'       → data is a BenchAggregate  (model × workflow benchmarking; fork A)
+ *   - 'compaction-diff' → data is a CompactionDiff  (what /compact dropped; fork B) — future
  *
  * Adding a fork = compute a struct, stamp the kind, render its panels. No new
  * delivery path, no second injector.
@@ -465,5 +465,63 @@ export interface ReportEnvelope {
   kind: ReportKind;
   generatedAt: string;    // ISO timestamp the report was produced
   ctxmapVersion: string;  // producing CtxMap version (guards against stale template/data drift)
-  data: SessionReport | MassAggregation;
+  data: SessionReport | BenchAggregate;
+}
+
+// ============================================================================
+// Benchmarking (fork A) — model × workflow comparison from tagged sessions
+// ============================================================================
+
+/** Manual quality rating a user attaches to a run (👍 / 👌 / 👎). */
+export type BenchRating = 'good' | 'ok' | 'bad';
+
+/**
+ * A user-attached tag for one session, stored locally (not in the transcript,
+ * which CtxMap only reads). This is the per-run unit a hosted benchmarking
+ * service would persist per user — the platform seed.
+ */
+export interface SessionTag {
+  workflow?: string;   // e.g. "radar-iteration", "bugfix", "docs"
+  rating?: BenchRating; // manual quality: the one axis transcripts can't give us
+  config?: string;     // optional free label (harness/extension stack)
+  note?: string;
+  taggedAt?: string;   // ISO timestamp
+}
+
+/** One tagged run as a flat row (the join of a SessionReport with its tag). */
+export interface BenchRunRow {
+  sessionId: string;
+  projectPath: string;
+  model: string;             // primaryModel label, auto-derived
+  workflow: string;          // '(untagged)' when absent
+  config?: string;
+  rating?: BenchRating;
+  cost: number;              // estimatedCost (incl. subagents)
+  turns: number;
+  peakContextPercent: number;
+  startTimestamp: string;
+}
+
+/** One cell of the model × workflow matrix (all runs sharing a workflow+model). */
+export interface BenchCell {
+  workflow: string;
+  model: string;
+  runs: number;
+  avgCost: number;
+  medianCost: number;
+  avgPeakPercent: number;
+  good: number;
+  ok: number;
+  bad: number;
+  qualityScore: number | null; // (good*1 + ok*0.5) / rated runs, in [0,1]; null if none rated
+}
+
+/** The aggregate struct rendered under kind:'aggregate'. */
+export interface BenchAggregate {
+  generatedAt: string;
+  totalRuns: number;
+  workflows: string[]; // row order
+  models: string[];    // column order
+  cells: BenchCell[];
+  rows: BenchRunRow[]; // the underlying tagged runs
 }

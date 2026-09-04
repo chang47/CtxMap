@@ -12,6 +12,8 @@ import type {
   ReportEnvelope,
   SessionReport,
   TopConsumer,
+  BenchAggregate,
+  BenchCell,
 } from '../core/types';
 
 // ---------------------------------------------------------------------------
@@ -227,6 +229,114 @@ function SessionReportView({ r }: { r: SessionReport }) {
 }
 
 // ---------------------------------------------------------------------------
+// Aggregate lens — model × workflow benchmark (fork A)
+// ---------------------------------------------------------------------------
+
+function QualityBar({ cell }: { cell: BenchCell }) {
+  const rated = cell.good + cell.ok + cell.bad;
+  if (rated === 0) return <span className="q-unrated">unrated</span>;
+  const pct = (n: number) => `${(n / rated) * 100}%`;
+  return (
+    <div className="qbar" title={`👍 ${cell.good}  👌 ${cell.ok}  👎 ${cell.bad}`}>
+      {cell.good > 0 && <span className="q-good" style={{ width: pct(cell.good) }} />}
+      {cell.ok > 0 && <span className="q-ok" style={{ width: pct(cell.ok) }} />}
+      {cell.bad > 0 && <span className="q-bad" style={{ width: pct(cell.bad) }} />}
+    </div>
+  );
+}
+
+function BenchView({ agg }: { agg: BenchAggregate }) {
+  const cellFor = (wf: string, model: string) =>
+    agg.cells.find((c) => c.workflow === wf && c.model === model);
+
+  return (
+    <>
+      <div className="sub">
+        <span>model × workflow benchmark</span>
+        <span className="dot">·</span>
+        <span>{agg.totalRuns} tagged runs</span>
+      </div>
+
+      <div className="stats">
+        <div className="stat">
+          <div className="label">Tagged runs</div>
+          <div className="value">{agg.totalRuns}</div>
+        </div>
+        <div className="stat">
+          <div className="label">Workflows</div>
+          <div className="value">{agg.workflows.length}</div>
+        </div>
+        <div className="stat">
+          <div className="label">Models</div>
+          <div className="value">{agg.models.length}</div>
+        </div>
+      </div>
+
+      <div style={{ height: 18 }} />
+
+      <div className="panel">
+        <h2>Cost × quality — workflow (rows) by model (columns, cheapest first)</h2>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="grid matrix">
+            <thead>
+              <tr>
+                <th>Workflow</th>
+                {agg.models.map((m) => <th key={m} style={{ textAlign: 'right' }}>{m}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {agg.workflows.map((wf) => (
+                <tr key={wf}>
+                  <td className="name">{wf}</td>
+                  {agg.models.map((m) => {
+                    const cell = cellFor(wf, m);
+                    if (!cell) return <td key={m} className="num empty-cell">·</td>;
+                    return (
+                      <td key={m} className="num cell">
+                        <div className="cell-cost">{formatCurrency(cell.avgCost)}</div>
+                        <div className="cell-meta">{cell.runs} run{cell.runs === 1 ? '' : 's'} · peak {cell.avgPeakPercent.toFixed(0)}%</div>
+                        <QualityBar cell={cell} />
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="matrix-legend">
+          <span><span className="swatch q-good" /> good</span>
+          <span><span className="swatch q-ok" /> ok</span>
+          <span><span className="swatch q-bad" /> bad</span>
+          <span className="matrix-note">avg cost per run · same workflow across models answers "can a cheaper model hold quality?"</span>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>Runs</h2>
+        <table className="grid">
+          <thead>
+            <tr><th>Workflow</th><th>Model</th><th style={{ textAlign: 'right' }}>Cost</th><th style={{ textAlign: 'right' }}>Turns</th><th style={{ textAlign: 'right' }}>Peak</th><th>Rating</th></tr>
+          </thead>
+          <tbody>
+            {agg.rows.map((r) => (
+              <tr key={r.sessionId}>
+                <td className="name" style={{ textAlign: 'left' }}>{r.workflow}</td>
+                <td className="num" style={{ textAlign: 'left' }}>{r.model}</td>
+                <td className="num">{formatCurrency(r.cost)}</td>
+                <td className="num">{r.turns.toLocaleString('en-US')}</td>
+                <td className="num">{r.peakContextPercent.toFixed(0)}%</td>
+                <td className="num" style={{ textAlign: 'left' }}>{r.rating ? { good: '👍 good', ok: '👌 ok', bad: '👎 bad' }[r.rating] : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Lens-agnostic shell — switch on envelope.kind
 // ---------------------------------------------------------------------------
 
@@ -244,6 +354,8 @@ export function ReportApp({ envelope }: { envelope: ReportEnvelope | null }) {
         </div>
       ) : envelope.kind === 'session' ? (
         <SessionReportView r={envelope.data as SessionReport} />
+      ) : envelope.kind === 'aggregate' ? (
+        <BenchView agg={envelope.data as BenchAggregate} />
       ) : (
         <div className="empty">
           The <code>{envelope.kind}</code> lens isn&apos;t rendered yet in this template.

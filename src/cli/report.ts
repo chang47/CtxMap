@@ -169,14 +169,13 @@ async function buildEnvelope(options: ReportOptions): Promise<ReportEnvelope> {
 }
 
 /**
- * Entry point for the `report` command. Returns the written file path plus the
- * envelope (so the caller can print a summary line).
+ * Low-level: inject a ready-made envelope into the template and write the file.
+ * Shared by every lens (session, aggregate/bench, …) — the single delivery path.
  */
-export async function writeReport(
-  options: ReportOptions
-): Promise<{ outPath: string; envelope: ReportEnvelope }> {
-  const envelope = await buildEnvelope(options);
-
+export function writeEnvelope(
+  envelope: ReportEnvelope,
+  options: { output?: string; open?: boolean; json?: string; defaultName?: string }
+): string {
   const tplPath = templatePath();
   if (!fs.existsSync(tplPath)) {
     throw new Error(
@@ -186,16 +185,35 @@ export async function writeReport(
   const template = fs.readFileSync(tplPath, 'utf-8');
   const html = injectData(template, envelope);
 
-  const outPath = path.resolve(options.output ?? 'ctxmap-report.html');
+  const outPath = path.resolve(options.output ?? options.defaultName ?? 'ctxmap-report.html');
   fs.writeFileSync(outPath, html, 'utf-8');
 
   if (options.json) {
     fs.writeFileSync(path.resolve(options.json), JSON.stringify(envelope, null, 2), 'utf-8');
   }
-
   if (options.open) {
     openInBrowser(outPath);
   }
+  return outPath;
+}
 
+/** Also expose the version helper so other lenses can stamp envelopes. */
+export function reportVersion(): string {
+  return ctxmapVersion();
+}
+
+/**
+ * Entry point for the `report` command. Returns the written file path plus the
+ * envelope (so the caller can print a summary line).
+ */
+export async function writeReport(
+  options: ReportOptions
+): Promise<{ outPath: string; envelope: ReportEnvelope }> {
+  const envelope = await buildEnvelope(options);
+  const outPath = writeEnvelope(envelope, {
+    output: options.output,
+    open: options.open,
+    json: options.json,
+  });
   return { outPath, envelope };
 }

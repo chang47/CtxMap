@@ -102,6 +102,21 @@ table.grid tr:last-child td { border-bottom: none; }
 .empty { text-align: center; color: var(--text-dim); padding: 80px 20px; }
 .empty code { font-family: var(--mono); background: var(--panel-2); padding: 2px 6px; border-radius: 4px; color: var(--text); }
 
+/* Benchmark matrix */
+table.matrix td.cell { vertical-align: top; padding: 10px; min-width: 130px; }
+.cell-cost { font-size: 14px; color: var(--accent); font-weight: 650; }
+.cell-meta { font-size: 11px; color: var(--text-faint); margin: 3px 0 6px; }
+td.empty-cell { color: var(--text-faint); text-align: center; }
+.qbar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--panel-2); }
+.qbar span { display: block; height: 100%; }
+.q-good { background: var(--good); }
+.q-ok { background: var(--warn); }
+.q-bad { background: var(--bad); }
+.q-unrated { font-size: 11px; color: var(--text-faint); }
+.matrix-legend { display: flex; gap: 16px; align-items: center; margin-top: 14px; font-size: 11.5px; color: var(--text-dim); flex-wrap: wrap; }
+.matrix-legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.matrix-note { color: var(--text-faint); font-family: var(--mono); }
+
 .foot { color: var(--text-faint); font-size: 11px; font-family: var(--mono); margin-top: 28px; text-align: center; }
 .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-family: var(--mono);
   background: var(--panel-2); color: var(--text-dim); border: 1px solid var(--border); }
