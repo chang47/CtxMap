@@ -141,6 +141,32 @@ function extractToolCall(message: AssistantMessage): ToolCall | null {
 }
 
 /**
+ * Normalize a tool_result's `content`. The transcript stores it either as a
+ * plain string or as an array of content blocks (text / tool_reference / image).
+ * Returns the concatenated text so downstream byte-size metrics measure the real
+ * payload — the previous code took `.length` on the array, which yields the
+ * block COUNT (e.g. 2), silently undercounting size on array-shaped results.
+ */
+export function normalizeToolResultContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((block) => {
+        if (typeof block === 'string') return block;
+        if (block && typeof block === 'object') {
+          const b = block as { type?: string; text?: string };
+          if (typeof b.text === 'string') return b.text;
+          if (b.type === 'image') return '[image]';
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  return '';
+}
+
+/**
  * Find tool result for a given tool use ID from user entries
  */
 function findToolResult(
@@ -157,7 +183,7 @@ function findToolResult(
 
       for (const item of content) {
         if (typeof item === 'object' && item.type === 'tool_result' && item.tool_use_id === toolUseId) {
-          return item.content;
+          return normalizeToolResultContent(item.content);
         }
       }
     }

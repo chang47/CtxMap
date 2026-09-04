@@ -3,6 +3,7 @@ import {
   parseTurns,
   getSessionMetadata,
   formatToolDescription,
+  normalizeToolResultContent,
 } from '../../src/core/parser.js';
 import type { JsonlEntry, ToolCall } from '../../src/core/types.js';
 
@@ -165,6 +166,83 @@ describe('parser', () => {
       const turns = parseTurns(entries);
 
       expect(turns[0].toolCall?.result).toBe('actual file contents');
+    });
+
+    it('should size array-shaped tool_result content by text bytes, not block count', () => {
+      // Real transcript shape: tool_result.content is an array of blocks
+      // (text / tool_reference / image), not a plain string.
+      const text = 'x'.repeat(500);
+      const entries: JsonlEntry[] = [
+        {
+          type: 'assistant',
+          timestamp: '2025-02-19T10:00:00Z',
+          sessionId: 'test-session',
+          isSidechain: false,
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'toolu_01', name: 'Task', input: { subagent_type: 'general' } },
+            ],
+            usage: { input_tokens: 100, output_tokens: 50 },
+          },
+        },
+        {
+          type: 'user',
+          timestamp: '2025-02-19T10:00:01Z',
+          sessionId: 'test-session',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_01',
+                content: [
+                  { type: 'text', text },
+                  { type: 'tool_reference', tool_name: 'WebSearch' },
+                  { type: 'image' },
+                ],
+              },
+            ],
+          },
+        },
+      ];
+
+      const turns = parseTurns(entries);
+
+      // Old bug: resultSize would be 3 (array length). Now it's the joined text bytes.
+      expect(turns[0].resultSize).toBe(text.length + '\n[image]'.length);
+      expect(turns[0].toolCall?.result).toContain(text);
+    });
+  });
+
+  describe('normalizeToolResultContent', () => {
+    it('should pass through a plain string', () => {
+      expect(normalizeToolResultContent('hello')).toBe('hello');
+    });
+
+    it('should join text blocks in an array', () => {
+      expect(
+        normalizeToolResultContent([
+          { type: 'text', text: 'line one' },
+          { type: 'text', text: 'line two' },
+        ])
+      ).toBe('line one\nline two');
+    });
+
+    it('should skip tool_reference blocks and mark images', () => {
+      expect(
+        normalizeToolResultContent([
+          { type: 'text', text: 'result' },
+          { type: 'tool_reference', tool_name: 'WebSearch' },
+          { type: 'image' },
+        ])
+      ).toBe('result\n[image]');
+    });
+
+    it('should return empty string for null/undefined/other', () => {
+      expect(normalizeToolResultContent(undefined)).toBe('');
+      expect(normalizeToolResultContent(null)).toBe('');
+      expect(normalizeToolResultContent(42)).toBe('');
     });
   });
 

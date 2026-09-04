@@ -35,10 +35,17 @@ export interface AssistantMessage {
   model?: string; // e.g. "claude-opus-4-8-20260101" — the model that served this turn
 }
 
+export interface ToolResultBlock {
+  type?: string;   // 'text' | 'tool_reference' | 'image' | …
+  text?: string;
+}
+
 export interface ToolResult {
   type: 'tool_result';
   tool_use_id: string;
-  content: string;
+  // The transcript stores this either as a plain string or as an array of
+  // content blocks. Normalize with normalizeToolResultContent() before sizing.
+  content: string | ToolResultBlock[];
   is_error?: boolean;
 }
 
