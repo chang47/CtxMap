@@ -12,6 +12,18 @@ export interface Usage {
   output_tokens: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
+  // Breakdown of cache_creation_input_tokens by TTL. 1-hour writes cost 2× input,
+  // 5-minute writes 1.25×, so pricing them separately is more accurate on
+  // long-running sessions. Absent on older transcripts → fall back to the flat rate.
+  cache_creation?: {
+    ephemeral_1h_input_tokens?: number;
+    ephemeral_5m_input_tokens?: number;
+  };
+  // Extended-thinking tokens are already counted inside output_tokens; this just
+  // breaks them out for display.
+  output_tokens_details?: {
+    thinking_tokens?: number;
+  };
 }
 
 export interface ToolUse {
@@ -176,6 +188,7 @@ export interface SessionReport {
   totalCacheCreation: number;
   totalCacheRead: number;
   totalContextTokens: number;
+  totalThinkingTokens: number; // extended-thinking tokens (subset of output, for display)
   peakContext: number;
   peakContextPercent: number;
   modelWindow: number;
@@ -221,10 +234,11 @@ export interface AnalysisOptions {
 export type ModelFamily = 'opus' | 'sonnet-5' | 'sonnet' | 'haiku' | 'fable' | 'unknown';
 
 export interface ModelPricing {
-  input: number;         // $ per 1M input tokens
-  output: number;        // $ per 1M output tokens
-  cacheCreation: number; // $ per 1M cache-write tokens (1.25x input)
-  cacheRead: number;     // $ per 1M cache-read tokens (0.10x input)
+  input: number;           // $ per 1M input tokens
+  output: number;          // $ per 1M output tokens
+  cacheCreation: number;   // $ per 1M 5-minute cache-write tokens (1.25x input)
+  cacheCreation1h: number; // $ per 1M 1-hour cache-write tokens (2x input)
+  cacheRead: number;       // $ per 1M cache-read tokens (0.10x input; Fable is 0.025x)
 }
 
 export interface ModelInfo {
@@ -237,17 +251,19 @@ export interface ModelInfo {
 // Default context window for the 1M-window model families (Opus, Sonnet, Fable).
 export const DEFAULT_WINDOW = 1_000_000;
 
-// Per-model context windows + pricing (per 1M tokens), current as of 2026-09-04.
-// Cache-write = 1.25x input, cache-read = 0.10x input.
+// Per-model context windows + pricing (per 1M tokens), current as of 2026-09-05.
+// Cache-write 5m = 1.25x input, cache-write 1h = 2x input, cache-read = 0.10x input
+// (Fable cache-read is 0.025x = $0.25/1M — the one exception). Confirmed against the
+// claude-api skill's prompt-caching doc.
 // Sonnet is split: Sonnet 5 = $2/$10, older Sonnet (4.x/3.x) = $3/$15.
 export const MODELS: Record<ModelFamily, ModelInfo> = {
-  opus:       { family: 'opus',     label: 'Opus',     window: 1_000_000, pricing: { input: 5.0,  output: 25.0, cacheCreation: 6.25,  cacheRead: 0.50 } },
-  'sonnet-5': { family: 'sonnet-5', label: 'Sonnet 5', window: 1_000_000, pricing: { input: 2.0,  output: 10.0, cacheCreation: 2.50,  cacheRead: 0.20 } },
-  sonnet:     { family: 'sonnet',   label: 'Sonnet',   window: 1_000_000, pricing: { input: 3.0,  output: 15.0, cacheCreation: 3.75,  cacheRead: 0.30 } },
-  haiku:      { family: 'haiku',    label: 'Haiku',    window: 200_000,   pricing: { input: 1.0,  output: 5.0,  cacheCreation: 1.25,  cacheRead: 0.10 } },
-  fable:      { family: 'fable',    label: 'Fable',    window: 1_000_000, pricing: { input: 10.0, output: 50.0, cacheCreation: 12.50, cacheRead: 1.00 } },
+  opus:       { family: 'opus',     label: 'Opus',     window: 1_000_000, pricing: { input: 5.0,  output: 25.0, cacheCreation: 6.25,  cacheCreation1h: 10.0, cacheRead: 0.50 } },
+  'sonnet-5': { family: 'sonnet-5', label: 'Sonnet 5', window: 1_000_000, pricing: { input: 2.0,  output: 10.0, cacheCreation: 2.50,  cacheCreation1h: 4.0,  cacheRead: 0.20 } },
+  sonnet:     { family: 'sonnet',   label: 'Sonnet',   window: 1_000_000, pricing: { input: 3.0,  output: 15.0, cacheCreation: 3.75,  cacheCreation1h: 6.0,  cacheRead: 0.30 } },
+  haiku:      { family: 'haiku',    label: 'Haiku',    window: 200_000,   pricing: { input: 1.0,  output: 5.0,  cacheCreation: 1.25,  cacheCreation1h: 2.0,  cacheRead: 0.10 } },
+  fable:      { family: 'fable',    label: 'Fable',    window: 1_000_000, pricing: { input: 10.0, output: 50.0, cacheCreation: 12.50, cacheCreation1h: 20.0, cacheRead: 0.25 } },
   // Fallback when the transcript carries no (or an unrecognized) model id. Priced/sized as Opus-class.
-  unknown:    { family: 'unknown',  label: 'Unknown',  window: 1_000_000, pricing: { input: 5.0,  output: 25.0, cacheCreation: 6.25,  cacheRead: 0.50 } },
+  unknown:    { family: 'unknown',  label: 'Unknown',  window: 1_000_000, pricing: { input: 5.0,  output: 25.0, cacheCreation: 6.25,  cacheCreation1h: 10.0, cacheRead: 0.50 } },
 };
 
 /**

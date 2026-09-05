@@ -501,6 +501,16 @@ describe('attribution', () => {
       expect(calculateCost(usage, 'claude-fable-5-1')).toBeCloseTo(60.0, 2);          // $10 + $50
     });
 
+    it('should price 1-hour cache writes higher than 5-minute writes', () => {
+      const opus = 'claude-opus-4-8';
+      // all 5-minute (no 1h breakdown) → Opus 5m write $6.25
+      expect(calculateCost({ inputTokens: 0, outputTokens: 0, cacheCreation: 1_000_000, cacheRead: 0 }, opus)).toBeCloseTo(6.25, 2);
+      // all 1-hour → Opus 1h write $10
+      expect(calculateCost({ inputTokens: 0, outputTokens: 0, cacheCreation: 1_000_000, cacheCreation1h: 1_000_000, cacheRead: 0 }, opus)).toBeCloseTo(10.0, 2);
+      // half/half → 0.5*6.25 + 0.5*10 = 8.125
+      expect(calculateCost({ inputTokens: 0, outputTokens: 0, cacheCreation: 1_000_000, cacheCreation1h: 500_000, cacheRead: 0 }, opus)).toBeCloseTo(8.125, 3);
+    });
+
     it('should handle small values at default (Opus) rates', () => {
       const cost = calculateCost({
         inputTokens: 1000,

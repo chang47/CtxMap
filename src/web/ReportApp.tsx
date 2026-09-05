@@ -72,6 +72,11 @@ function VerdictHeader({ r }: { r: SessionReport }) {
         {hasSubagents && <div className="split"><span>+{(r.subagentTurns ?? 0).toLocaleString('en-US')} subagent</span></div>}
       </div>
       <div className="stat">
+        <div className="label">Output</div>
+        <div className="value" style={{ fontSize: 18 }}>{formatTokens(r.totalOutputTokens)}</div>
+        {r.totalThinkingTokens > 0 && <div className="split"><span>{formatTokens(r.totalThinkingTokens)} thinking</span></div>}
+      </div>
+      <div className="stat">
         <div className="label">Model</div>
         <div className="value" style={{ fontSize: 18 }}>{r.primaryModel ?? 'Unknown'}</div>
       </div>

@@ -246,7 +246,7 @@ export function formatReport(report: SessionReport): string {
 
   lines.push(
     formatLine(
-      `│ Total Input: ${formatTokens(report.totalInputTokens)} | Output: ${formatTokens(report.totalOutputTokens)}`,
+      `│ Total Input: ${formatTokens(report.totalInputTokens)} | Output: ${formatTokens(report.totalOutputTokens)}${report.totalThinkingTokens > 0 ? ` (${formatTokens(report.totalThinkingTokens)} thinking)` : ''}`,
       width
     )
   );

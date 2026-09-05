@@ -453,16 +453,20 @@ export function calculateCost(
   usage: {
     inputTokens: number;
     outputTokens: number;
-    cacheCreation: number;
+    cacheCreation: number;   // total cache-write tokens (both TTLs)
+    cacheCreation1h?: number; // of which 1-hour TTL (priced at 2× input); rest at 5m (1.25×)
     cacheRead: number;
   },
   model?: string
 ): number {
   const p = resolveModel(model).pricing;
+  const c1h = Math.min(usage.cacheCreation, Math.max(0, usage.cacheCreation1h ?? 0));
+  const c5m = Math.max(0, usage.cacheCreation - c1h);
   const cost =
     (usage.inputTokens / 1_000_000) * p.input +
     (usage.outputTokens / 1_000_000) * p.output +
-    (usage.cacheCreation / 1_000_000) * p.cacheCreation +
+    (c5m / 1_000_000) * p.cacheCreation +
+    (c1h / 1_000_000) * p.cacheCreation1h +
     (usage.cacheRead / 1_000_000) * p.cacheRead;
 
   return cost;
@@ -482,6 +486,7 @@ export function calculateSessionCost(turns: Turn[]): number {
           inputTokens: t.usage.input_tokens,
           outputTokens: t.usage.output_tokens,
           cacheCreation: t.usage.cache_creation_input_tokens || 0,
+          cacheCreation1h: t.usage.cache_creation?.ephemeral_1h_input_tokens || 0,
           cacheRead: t.usage.cache_read_input_tokens || 0,
         },
         t.model
@@ -548,6 +553,10 @@ export function generateReport(
     (sum, t) => sum + (t.usage.cache_read_input_tokens || 0),
     0
   );
+  const totalThinkingTokens = turns.reduce(
+    (sum, t) => sum + (t.usage.output_tokens_details?.thinking_tokens || 0),
+    0
+  );
   const totalContextTokens = turns.reduce((sum, t) => sum + t.tokenDelta, 0);
   const peakContext = Math.max(...turns.map(t => t.contextTokens), 0);
   const peakContextPercent = (peakContext / modelWindow) * 100;
@@ -573,6 +582,7 @@ export function generateReport(
     totalTurns: turns.length,
     totalInputTokens,
     totalOutputTokens,
+    totalThinkingTokens,
     totalCacheCreation,
     totalCacheRead,
     totalContextTokens,
