@@ -18,7 +18,9 @@ const OVERSIZED_BYTES = 50_000;        // a single tool result this big is worth
 const OVERSIZED_HIGH_BYTES = 150_000;  // …and this big is a high-severity flag
 const REPEAT_MIN_COUNT = 3;            // read the same file N+ times
 const REPEAT_MIN_AVG_TOKENS = 2_000;   // …and it's non-trivial in size
+const HOT_CHURN_MIN = 15;              // edit+write a single file this many times
 const CACHE_MIN_CREATION = 20_000;     // cache re-created this much in one turn
+const CACHE_MIN_USD = 0.5;             // …and only flag if the extra cost is meaningful
 const DEADWEIGHT_MIN_BYTES = 40_000;   // a single large read, loaded once
 
 const BYTES_PER_TOKEN = 4; // rough bytes→tokens for size→token estimates
@@ -50,11 +52,18 @@ export function computeFindings(input: FindingsInput): Finding[] {
       if (perCall < OVERSIZED_BYTES) continue;
       const kb = Math.round(perCall / 1024);
       const estTokens = Math.round(perCall / BYTES_PER_TOKEN);
+      // A single big-but-not-huge read is often a legitimate, necessary load — flag
+      // it low. Escalate when it's genuinely huge, or repeated (repetition = the
+      // waste, since each occurrence re-enters context).
+      let severity: 'high' | 'medium' | 'low';
+      if (perCall >= OVERSIZED_HIGH_BYTES || f.count >= 3) severity = 'high';
+      else if (f.count >= 2) severity = 'medium';
+      else severity = 'low';
       findings.push({
         rule: 'oversized-output',
-        severity: perCall >= OVERSIZED_HIGH_BYTES ? 'high' : 'medium',
-        title: `${tool.toolName} returned ~${kb}KB${f.count > 1 ? ` (×${f.count})` : ''}`,
-        detail: `${tool.toolName} "${f.path}" put ~${kb}KB (~${estTokens.toLocaleString()} tokens) into context${f.count > 1 ? ` and did so ${f.count} times` : ''}. That payload is re-sent every turn after until compaction.`,
+        severity,
+        title: `${tool.toolName} ${shortPath(f.path)} ~${kb}KB${f.count > 1 ? ` ×${f.count}` : ''}`,
+        detail: `${tool.toolName} "${f.path}" put ~${kb}KB (~${estTokens.toLocaleString()} tokens) into context${f.count > 1 ? ` and did so ${f.count} times` : ''}. That payload rides along in context every turn after until compaction.`,
         fix:
           tool.toolName === 'Bash'
             ? 'Pipe the command through head/tail/grep so only the part you need enters context.'
@@ -65,20 +74,49 @@ export function computeFindings(input: FindingsInput): Finding[] {
     }
   }
 
-  // 2. Repeated reads of the same file — each reload re-enters context.
+  // 2. Hot file — one file touched many times across Read/Edit/Write. Repeated
+  //    large READS are wasteful (each reload re-enters context); heavy EDIT/WRITE
+  //    churn is real context load worth surfacing even though it isn't pure waste.
+  const perFile = new Map<string, { reads: number; edits: number; writes: number; avgReadTokens: number }>();
   for (const fs of fileStats) {
-    if (fs.toolName !== 'Read') continue;
-    if (fs.count < REPEAT_MIN_COUNT || fs.avgTokens < REPEAT_MIN_AVG_TOKENS) continue;
-    const redundant = (fs.count - 1) * fs.avgTokens; // reloads beyond the first
+    const e = perFile.get(fs.filePath) ?? { reads: 0, edits: 0, writes: 0, avgReadTokens: 0 };
+    if (fs.toolName === 'Read') { e.reads += fs.count; e.avgReadTokens = Math.max(e.avgReadTokens, fs.avgTokens); }
+    else if (fs.toolName === 'Edit') e.edits += fs.count;
+    else if (fs.toolName === 'Write') e.writes += fs.count;
+    perFile.set(fs.filePath, e);
+  }
+  for (const [file, e] of perFile) {
+    const touches = e.reads + e.edits + e.writes;
+    const churn = e.edits + e.writes;
+    const redundant =
+      e.reads >= REPEAT_MIN_COUNT && e.avgReadTokens >= REPEAT_MIN_AVG_TOKENS
+        ? (e.reads - 1) * e.avgReadTokens
+        : 0;
+    const heavyReads = redundant > 0;
+    const heavyChurn = churn >= HOT_CHURN_MIN;
+    if (!heavyReads && !heavyChurn) continue;
+
+    const breakdown = `${e.reads}R/${e.edits}E/${e.writes}W`;
+    let severity: 'high' | 'medium' | 'low';
+    let fix: string;
+    if (heavyReads) {
+      severity = redundant >= 50_000 ? 'high' : 'medium';
+      fix = 'Read it once and refer back, or narrow to the section you need — repeated full reads pile up in context.';
+    } else {
+      severity = churn >= HOT_CHURN_MIN * 3 ? 'medium' : 'low';
+      fix = 'Heavy edit/write churn on one file — each operation and its result ride in context. If you keep rewriting the same regions, prefer fewer, larger edits.';
+    }
     findings.push({
-      rule: 'repeated-read',
-      severity: redundant >= 50_000 ? 'high' : 'medium',
-      title: `Read ${shortPath(fs.filePath)} ${fs.count}×`,
-      detail: `The same file was read ${fs.count} times (~${Math.round(fs.avgTokens).toLocaleString()} tokens each). Every reload re-enters context; ~${Math.round(redundant).toLocaleString()} tokens are redundant reloads.`,
-      fix: 'Read it once and refer back, or narrow to the section you need — repeated full reads pile up in context.',
-      wastedTokens: Math.round(redundant),
-      wastedUsd: usd(redundant, pricing.input),
-      file: fs.filePath,
+      rule: 'hot-file',
+      severity,
+      title: `Churned ${shortPath(file)} ${touches}× (${breakdown})`,
+      detail: heavyReads
+        ? `Read ${e.reads}× (~${Math.round(e.avgReadTokens).toLocaleString()} tokens each) plus ${churn} edit/write${churn === 1 ? '' : 's'}; ~${Math.round(redundant).toLocaleString()} tokens are redundant reloads.`
+        : `Touched ${touches} times (${breakdown}). That's a lot of activity on one file — the operations and their results accumulate in context.`,
+      fix,
+      wastedTokens: heavyReads ? Math.round(redundant) : undefined,
+      wastedUsd: heavyReads ? usd(redundant, pricing.input) : undefined,
+      file,
     });
   }
 
@@ -104,8 +142,9 @@ export function computeFindings(input: FindingsInput): Finding[] {
   // Discount the expected once-per-compaction rebuild: only the events beyond the
   // number of compactions are "extra" re-creations worth flagging.
   const extraEvents = recreationEvents; // count of qualifying events (compaction turns already excluded)
-  if (extraEvents >= 3 && recreationTokens >= CACHE_MIN_CREATION) {
-    const wastedUsd = usd(recreationTokens, pricing.cacheCreation - pricing.cacheRead);
+  const recreationUsd = usd(recreationTokens, pricing.cacheCreation - pricing.cacheRead);
+  if (extraEvents >= 3 && recreationTokens >= CACHE_MIN_CREATION && recreationUsd >= CACHE_MIN_USD) {
+    const wastedUsd = recreationUsd;
     findings.push({
       rule: 'cache-recreation',
       severity: extraEvents >= 8 ? 'high' : 'medium',

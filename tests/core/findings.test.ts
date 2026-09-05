@@ -32,24 +32,37 @@ describe('computeFindings', () => {
     expect(o!.fix).toMatch(/head|tail|grep/i);
   });
 
-  it('flags a repeatedly-read file and estimates redundant reloads', () => {
+  it('flags a repeatedly-read file (hot-file) and estimates redundant reloads', () => {
     const fileStats: FileStats[] = [
       { filePath: '/a/log.md', toolName: 'Read', count: 5, totalTokens: 15000, avgTokens: 3000 },
     ];
     const f = computeFindings({ ...empty, fileStats });
-    const r = f.find((x) => x.rule === 'repeated-read');
+    const r = f.find((x) => x.rule === 'hot-file');
     expect(r).toBeTruthy();
     expect(r!.wastedTokens).toBe(12000); // (5-1) * 3000
     expect(r!.title).toContain('5×');
+    expect(r!.title).toContain('5R/0E/0W');
   });
 
-  it('does NOT flag a file read only twice or a tiny file', () => {
+  it('flags heavy edit/write churn on one file (no false token claim)', () => {
+    const fileStats: FileStats[] = [
+      { filePath: '/a/log.md', toolName: 'Edit', count: 40, totalTokens: 20000, avgTokens: 500 },
+    ];
+    const f = computeFindings({ ...empty, fileStats });
+    const r = f.find((x) => x.rule === 'hot-file');
+    expect(r).toBeTruthy();
+    expect(r!.title).toContain('0R/40E/0W');
+    expect(r!.wastedTokens).toBeUndefined(); // churn is not claimed as waste
+  });
+
+  it('does NOT flag a file read only twice, a tiny file, or a lightly-edited file', () => {
     const fileStats: FileStats[] = [
       { filePath: '/a/x.md', toolName: 'Read', count: 2, totalTokens: 8000, avgTokens: 4000 }, // < 3 reads
       { filePath: '/a/y.md', toolName: 'Read', count: 9, totalTokens: 900, avgTokens: 100 },   // tiny
+      { filePath: '/a/z.md', toolName: 'Edit', count: 5, totalTokens: 2000, avgTokens: 400 },  // < churn threshold
     ];
     const f = computeFindings({ ...empty, fileStats });
-    expect(f.some((x) => x.rule === 'repeated-read')).toBe(false);
+    expect(f.some((x) => x.rule === 'hot-file')).toBe(false);
   });
 
   it('collapses recurring cache re-creation into a single finding (not one per turn)', () => {
@@ -79,7 +92,7 @@ describe('computeFindings', () => {
         files: [{ path: '/big', sizeBytes: 200_000, count: 1 }] }, // high oversized
     ];
     const fileStats: FileStats[] = [
-      { filePath: '/a/log.md', toolName: 'Read', count: 4, totalTokens: 8000, avgTokens: 2000 }, // medium repeat
+      { filePath: '/a/log.md', toolName: 'Read', count: 4, totalTokens: 8000, avgTokens: 2000 }, // medium hot-file
     ];
     const f = computeFindings({ ...empty, toolSizeStats, fileStats });
     expect(f[0].severity).toBe('high');
