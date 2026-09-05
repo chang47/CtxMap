@@ -416,5 +416,72 @@ program
     }
   });
 
+// Judge command - opt-in LLM-as-judge to auto-set a session's quality rating
+program
+  .command('judge <session>')
+  .description('Auto-rate a session\'s quality with an LLM judge (opt-in; makes one API call)')
+  .option('-w, --workflow <name>', 'Also set the workflow label')
+  .option('-m, --model <id>', 'Judge model', 'claude-opus-5')
+  .option('--dry-run', 'Print the judge prompt and exit — no API call, no key needed')
+  .action(async (session, options) => {
+    try {
+      const { extractJudgeInput, buildJudgePrompt, parseJudgeResponse } = await import('../core/judge.js');
+      const { upsertTag } = await import('../core/tags.js');
+
+      const all = await listSessions();
+      const match = all.find((x) => x.sessionId === session || x.sessionId.startsWith(session));
+      if (!match) {
+        console.error(`Session not found: ${session}`);
+        process.exit(1);
+      }
+      const entries = await parseJsonlFile(match.filePath);
+      const input = extractJudgeInput(entries);
+      const { system, user } = buildJudgePrompt(input);
+
+      if (options.dryRun) {
+        console.log('--- SYSTEM ---\n' + system + '\n\n--- USER ---\n' + user);
+        return;
+      }
+
+      // The only place CtxMap calls an API. Dynamic import keeps the core read-only.
+      const { default: Anthropic } = await import('@anthropic-ai/sdk');
+      let client;
+      try {
+        client = new Anthropic();
+      } catch {
+        console.error('No Anthropic credentials. Set ANTHROPIC_API_KEY or run `ant auth login`, then retry (or use --dry-run).');
+        process.exit(1);
+      }
+
+      const resp = await client.messages.create({
+        model: options.model,
+        max_tokens: 1024,
+        output_config: { effort: 'low' },
+        system,
+        messages: [{ role: 'user', content: user }],
+      } as Parameters<typeof client.messages.create>[0]) as { content: Array<{ type: string; text?: string }> };
+
+      const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text || '').join('\n');
+      const verdict = parseJudgeResponse(text);
+      if (!verdict) {
+        console.error('Judge did not return a parseable rating. Raw reply:\n' + text.slice(0, 300));
+        process.exit(1);
+      }
+
+      const merged = upsertTag(match.sessionId, {
+        workflow: options.workflow,
+        rating: verdict.rating,
+        ratingSource: 'judge',
+        note: verdict.rationale,
+      });
+      const mark = { good: '👍', ok: '👌', bad: '👎' }[verdict.rating];
+      console.error(`✓ judged ${match.sessionId.slice(0, 8)} → ${mark} ${verdict.rating} (${options.model})${merged.workflow ? ' · workflow=' + merged.workflow : ''}`);
+      console.error(`  ${verdict.rationale}`);
+    } catch (error) {
+      console.error('Error judging session:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 // Parse and run
 program.parse();

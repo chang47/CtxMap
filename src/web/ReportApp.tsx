@@ -366,7 +366,7 @@ function BenchView({ agg }: { agg: BenchAggregate }) {
                 <td className="num">{formatCurrency(r.cost)}</td>
                 <td className="num">{r.turns.toLocaleString('en-US')}</td>
                 <td className="num">{r.peakContextPercent.toFixed(0)}%</td>
-                <td className="num" style={{ textAlign: 'left' }}>{r.rating ? { good: '👍 good', ok: '👌 ok', bad: '👎 bad' }[r.rating] : '—'}</td>
+                <td className="num" style={{ textAlign: 'left' }}>{r.rating ? `${{ good: '👍 good', ok: '👌 ok', bad: '👎 bad' }[r.rating]}${r.ratingSource === 'judge' ? ' ⚖' : ''}` : '—'}</td>
               </tr>
             ))}
           </tbody>

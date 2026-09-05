@@ -522,9 +522,10 @@ export type BenchRating = 'good' | 'ok' | 'bad';
  */
 export interface SessionTag {
   workflow?: string;   // e.g. "radar-iteration", "bugfix", "docs"
-  rating?: BenchRating; // manual quality: the one axis transcripts can't give us
+  rating?: BenchRating; // quality: the one axis transcripts can't give us
+  ratingSource?: 'manual' | 'judge'; // how the rating was set
   config?: string;     // optional free label (harness/extension stack)
-  note?: string;
+  note?: string;       // free note, or the judge's rationale
   taggedAt?: string;   // ISO timestamp
 }
 
@@ -536,6 +537,7 @@ export interface BenchRunRow {
   workflow: string;          // '(untagged)' when absent
   config?: string;
   rating?: BenchRating;
+  ratingSource?: 'manual' | 'judge';
   cost: number;              // estimatedCost (incl. subagents)
   turns: number;
   peakContextPercent: number;
