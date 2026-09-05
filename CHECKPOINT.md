@@ -43,6 +43,11 @@ Ran across all 8 real sessions + independently verified findings from the raw JS
 events were 98% gap-correlated; the oversized read was a real 58KB file; the TTL split matched a 100%-1h
 session). Engine + all detectors + the TTL cost all hold on real data.
 
+## Open issues (logged 2026-09-05)
+- **#3 — pre-launch readiness** (README stale, no LICENSE, missing package metadata): blocks a credible npm publish.
+- **#4 — retired serve/dashboard dead code**: delete, or rebuild as the `report --all` trends mode.
+- **#5 — polish backlog**: cache-recreation $ ignores the 1h TTL rate; no CLI/integration test coverage; `aggregate` naming overlap.
+
 ## Next up (resume here)
 
 1. **Launch (needs operator go — outward-facing):** `npm publish` the package, then **Show HN** (title in
