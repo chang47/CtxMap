@@ -24,8 +24,13 @@ function formatPercent(value: number): string {
 
 export function Overview({ data }: OverviewProps) {
   const totalTokens = data.totalInputTokens + data.totalOutputTokens;
-  const cacheHitRate = data.totalInputTokens > 0
-    ? (data.totalCacheRead / data.totalInputTokens) * 100
+  // Cache hit rate = share of ALL input tokens served from cache. The old
+  // denominator was totalInputTokens (only the fresh, uncached input — tiny once
+  // a prompt is cached), so the ratio routinely exceeded 100% (500–3000%). The
+  // correct denominator is every input token: fresh + cache-write + cache-read.
+  const totalInputAll = data.totalInputTokens + data.totalCacheCreation + data.totalCacheRead;
+  const cacheHitRate = totalInputAll > 0
+    ? (data.totalCacheRead / totalInputAll) * 100
     : 0;
 
   const stats = [

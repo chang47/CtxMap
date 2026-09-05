@@ -67,9 +67,11 @@ export async function aggregateAllSessions(options: AggregateOptions = {}): Prom
 }
 
 /**
- * Build mass aggregation from session reports
+ * Build mass aggregation from session reports. Pure (no IO) — exported so the
+ * aggregation logic can be tested directly on synthetic reports rather than
+ * re-implemented in the test.
  */
-function buildMassAggregation(reports: SessionReport[]): MassAggregation {
+export function buildMassAggregation(reports: SessionReport[]): MassAggregation {
   if (reports.length === 0) {
     return {
       startDate: '',
@@ -96,9 +98,13 @@ function buildMassAggregation(reports: SessionReport[]): MassAggregation {
     a.startTimestamp.localeCompare(b.startTimestamp)
   );
 
-  // Calculate date range
+  // Calculate date range. startDate = earliest start (sortedReports is by start);
+  // endDate = the LATEST end across all reports — not the end of the latest-starting
+  // report, which can end sooner than an earlier-starting long-running session.
   const startDate = sortedReports[0].startTimestamp.substring(0, 10);
-  const endDate = sortedReports[sortedReports.length - 1].endTimestamp.substring(0, 10);
+  const endDate = reports
+    .reduce((max, r) => (r.endTimestamp > max ? r.endTimestamp : max), reports[0].endTimestamp)
+    .substring(0, 10);
 
   // Aggregate projects
   const projectMap = new Map<string, { count: number; cost: number; tokens: number }>();

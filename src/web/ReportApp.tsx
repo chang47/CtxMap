@@ -177,7 +177,7 @@ function ContextOverTime({ r }: { r: SessionReport }) {
             <Tooltip
               contentStyle={{ background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
               labelStyle={{ color: 'var(--text-dim)' }}
-              formatter={(v: number) => [formatTokens(v) + ' tokens', 'context']}
+              formatter={(v) => [formatTokens(Number(v) || 0) + ' tokens', 'context'] as [string, string]}
               labelFormatter={(l) => `turn ${l}`}
             />
             <ReferenceLine y={r.modelWindow} stroke="var(--bad)" strokeDasharray="4 4"

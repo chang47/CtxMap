@@ -39,13 +39,18 @@ export function Timeline({ data }: TimelineProps) {
     outputTokensK: Math.round(day.outputTokens / 1000),
   }));
 
-  // Calculate weekly aggregates
-  const weeklyMap = new Map<string, { sessions: number; cost: number; inputTokens: number; outputTokens: number; week: string }>();
+  // Calculate weekly aggregates. Bucket by the Monday of each week (ISO week
+  // start), matching the CLI's `aggregate` so the two never disagree. Sort by the
+  // ISO week key (monotonic) and label with a readable "MMM D" of that Monday —
+  // the old `W${…}` label was non-monotonic and arbitrary.
+  const weeklyMap = new Map<string, { sessions: number; cost: number; inputTokens: number; outputTokens: number; weekKey: string }>();
   for (const day of data.dailyTotals) {
     const date = new Date(day.date);
-    const weekStart = new Date(date);
-    weekStart.setDate(date.getDate() - date.getDay());
-    const weekKey = weekStart.toISOString().slice(0, 10);
+    const dow = date.getDay();
+    const diff = date.getDate() - dow + (dow === 0 ? -6 : 1); // Monday of this week
+    const monday = new Date(date);
+    monday.setDate(diff);
+    const weekKey = monday.toISOString().slice(0, 10);
 
     const existing = weeklyMap.get(weekKey);
     if (existing) {
@@ -59,14 +64,18 @@ export function Timeline({ data }: TimelineProps) {
         cost: day.cost,
         inputTokens: day.inputTokens,
         outputTokens: day.outputTokens,
-        week: `W${Math.ceil((date.getMonth() + 1) * 4 + date.getDate() / 7)}`,
+        weekKey,
       });
     }
   }
 
   const weeklyData = Array.from(weeklyMap.values())
-    .sort((a, b) => a.week.localeCompare(b.week))
-    .slice(-8); // Last 8 weeks
+    .sort((a, b) => a.weekKey.localeCompare(b.weekKey))
+    .slice(-8) // Last 8 weeks
+    .map((w) => ({
+      ...w,
+      week: new Date(w.weekKey).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    }));
 
   return (
     <div className="space-y-8">
